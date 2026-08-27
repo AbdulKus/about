@@ -3,20 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#120006">
-  <meta name="description" content="ABOUT — an interactive room between two worlds.">
-  <title>ABOUT — The Waiting Room</title>
-  <link rel="stylesheet" href="scene.css">
+  <meta name="theme-color" content="#080204">
+  <meta name="description" content="About">
+  <title>about</title>
+  <link rel="stylesheet" href="./scene.css?v=2">
 </head>
 <body>
-  <div id="loader" class="loader" aria-hidden="true">
-    <div class="loader-mark">
-      <span>THE WAITING ROOM</span>
-      <i></i>
-      <small>PLEASE STAND BY</small>
-    </div>
-  </div>
-
   <canvas id="world" aria-label="Интерактивная сцена в стиле Чёрного вигвама"></canvas>
 
   <div class="signal-layer" aria-hidden="true">
@@ -27,26 +19,11 @@
   <div class="grain" aria-hidden="true"></div>
   <div class="vignette" aria-hidden="true"></div>
 
-  <header class="signal-id" aria-hidden="true">
-    <span>ROOM <b>∞</b></span>
-    <i></i>
-    <span id="signalStatus">SIGNAL STABLE</span>
-  </header>
-
-  <p class="scene-hint" aria-hidden="true">
-    <span>MOVE THE POINTER</span>
-    <i></i>
-    <span>CHOOSE ON THE BOARD</span>
-  </p>
-
   <div class="sr-only" role="group" aria-label="Варианты оформления сцены">
     <button type="button" data-theme="red">Красная комната</button>
     <button type="button" data-theme="blue">Голубая роза</button>
     <button type="button" data-theme="mono">Чёрно-белый сигнал</button>
   </div>
-  <p id="themeAnnouncement" class="sr-only" aria-live="polite"></p>
-
-  <noscript><p class="noscript">Для входа в комнату необходим JavaScript.</p></noscript>
-  <script type="module" src="scene.js"></script>
+  <script type="module" src="./scene.js?v=2"></script>
 </body>
 </html>
