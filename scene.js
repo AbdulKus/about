@@ -48,7 +48,7 @@ class WaitingRoom {
     this.pointerTarget = new THREE.Vector2();
     this.pointerNdc = new THREE.Vector2(3, 3);
     this.raycaster = new THREE.Raycaster();
-    this.raycaster.layers.set(1);
+    this.raycaster.layers.set(0);
     this.themeKey = "red";
     this.hoveredButton = null;
     this.glitchPulse = 0;
@@ -58,16 +58,16 @@ class WaitingRoom {
     this.isPortrait = false;
     this.outputWidth = 1;
     this.outputHeight = 1;
-    this.lowResTarget = null;
     this.curtainMaterials = [];
     this.lampLights = [];
     this.dust = [];
     this.buttonRegions = [];
 
     this.init();
+    this.ready = true;
     this.animate = this.animate.bind(this);
+    this.render();
     requestAnimationFrame(this.animate);
-    this.completeLoad();
   }
 
   init() {
@@ -82,7 +82,7 @@ class WaitingRoom {
     this.renderer.toneMappingExposure = 1.08;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.autoClear = false;
+    this.renderer.autoClear = true;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x070103);
@@ -95,7 +95,6 @@ class WaitingRoom {
     this.mobileEnd = new THREE.Vector3(0, 5.15, 18.7);
     this.camera.position.copy(this.desktopStart);
 
-    this.createCompositePass();
     this.createTextures();
     this.createLights();
     this.createRoom();
@@ -105,22 +104,6 @@ class WaitingRoom {
     this.createVisitor();
     this.resize();
     this.bindEvents();
-  }
-
-  createCompositePass() {
-    this.compositeScene = new THREE.Scene();
-    this.compositeCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.compositeMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false
-    });
-    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.compositeMaterial);
-    quad.frustumCulled = false;
-    this.compositeScene.add(quad);
-    this.depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.BasicDepthPacking });
-    this.depthMaterial.colorWrite = false;
   }
 
   createCanvasTexture(size, draw, repeat = [1, 1]) {
@@ -206,6 +189,7 @@ class WaitingRoom {
   createLights() {
     const ambient = new THREE.HemisphereLight(0x7b4b55, 0x070104, 0.65);
     this.scene.add(ambient);
+    this.scene.add(new THREE.AmbientLight(0x9a6d73, .72));
 
     const ceilingGlow = new THREE.SpotLight(0xffd4aa, 20, 38, Math.PI * .24, .72, 1.4);
     ceilingGlow.position.set(0, 12, 5);
@@ -347,7 +331,6 @@ class WaitingRoom {
     });
     this.boardScreen = new THREE.Mesh(new THREE.PlaneGeometry(7.6, 4.28), this.boardMaterial);
     this.boardScreen.position.set(0, 4.08, .19);
-    this.boardScreen.layers.set(1);
     this.boardScreen.userData.isBoard = true;
     this.board.add(this.boardScreen);
 
@@ -721,23 +704,6 @@ class WaitingRoom {
     this.renderer.setSize(this.outputWidth, this.outputHeight, false);
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
-    const worldScale = this.isPortrait ? .58 : .54;
-    const lowWidth = Math.max(1, Math.floor(width * worldScale));
-    const lowHeight = Math.max(1, Math.floor(height * worldScale));
-    if (!this.lowResTarget) {
-      this.lowResTarget = new THREE.WebGLRenderTarget(lowWidth, lowHeight, {
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
-        generateMipmaps: false,
-        depthBuffer: true,
-        stencilBuffer: false
-      });
-      this.lowResTarget.texture.colorSpace = THREE.SRGBColorSpace;
-      this.compositeMaterial.map = this.lowResTarget.texture;
-      this.compositeMaterial.needsUpdate = true;
-    } else {
-      this.lowResTarget.setSize(lowWidth, lowHeight);
-    }
     this.camera.aspect = width / height;
     this.camera.fov = this.isPortrait ? 61 : 48;
     this.camera.updateProjectionMatrix();
@@ -745,38 +711,10 @@ class WaitingRoom {
   }
 
   render() {
-    const oldMask = this.camera.layers.mask;
-    this.camera.layers.set(0);
-    this.renderer.setRenderTarget(this.lowResTarget);
-    this.renderer.setViewport(0, 0, this.lowResTarget.width, this.lowResTarget.height);
-    this.renderer.clear(true, true, true);
-    this.renderer.render(this.scene, this.camera);
-
     this.renderer.setRenderTarget(null);
     this.renderer.setViewport(0, 0, this.outputWidth, this.outputHeight);
     this.renderer.clear(true, true, true);
-    this.renderer.render(this.compositeScene, this.compositeCamera);
-
-    this.renderer.clearDepth();
-    this.scene.overrideMaterial = this.depthMaterial;
-    this.camera.layers.set(0);
     this.renderer.render(this.scene, this.camera);
-    this.scene.overrideMaterial = null;
-    this.camera.layers.set(1);
-    this.renderer.render(this.scene, this.camera);
-    this.camera.layers.mask = oldMask;
-  }
-
-  async completeLoad() {
-    const pageReady = document.readyState === "complete"
-      ? Promise.resolve()
-      : new Promise((resolve) => window.addEventListener("load", resolve, { once: true }));
-    await pageReady;
-    this.render();
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    this.clock.getDelta();
-    this.ready = true;
-    document.body.classList.add("scene-ready");
   }
 
   animate(now) {
