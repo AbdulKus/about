@@ -1,4 +1,4 @@
-import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import * as THREE from "./three.module.min.js";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, amount) => a + (b - a) * amount;
@@ -379,43 +379,25 @@ class WaitingRoom {
     ctx.strokeRect(28, 28, width - 56, height - 56);
     ctx.globalAlpha = 1;
 
-    ctx.fillStyle = soft;
-    ctx.font = "700 22px 'Courier New', monospace";
-    ctx.letterSpacing = "3px";
-    ctx.fillText("ROOM://ABOUT", 64, 78);
-    ctx.textAlign = "right";
-    ctx.fillText("CH. 00 — LIVE", width - 64, 78);
-    ctx.textAlign = "left";
+    ctx.fillStyle = "#eee7df";
+    ctx.font = "44px Georgia, serif";
+    ctx.fillText("about", 64, 91);
 
-    ctx.fillStyle = "#f2e4d6";
-    ctx.font = "700 72px 'Courier New', monospace";
-    ctx.fillText("ABDUL", 62, 188);
-    ctx.fillStyle = accent;
-    ctx.fillRect(64, 214, 164, 7);
-    ctx.fillStyle = soft;
-    ctx.font = "700 22px 'Courier New', monospace";
-    ctx.fillText("PERSONAL TERMINAL / BETWEEN TWO WORLDS", 64, 270);
-
-    ctx.strokeStyle = "rgba(255,255,255,.13)";
-    ctx.beginPath();
-    ctx.moveTo(64, 316);
-    ctx.lineTo(width - 64, 316);
-    ctx.stroke();
-    ctx.fillStyle = soft;
-    ctx.font = "700 18px 'Courier New', monospace";
-    ctx.fillText("SELECT A TRANSMISSION", 64, 358);
+    ctx.strokeStyle = "rgba(255,255,255,.14)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(64, 122, width - 128, 265);
 
     const labels = [
-      ["red", "01", "RED ROOM"],
-      ["blue", "02", "BLUE ROSE"],
-      ["mono", "03", "MONO SIGNAL"]
+      ["red", "red"],
+      ["blue", "blue"],
+      ["mono", "b/w"]
     ];
     this.buttonRegions = [];
     const gap = 22;
     const buttonWidth = (width - 128 - gap * 2) / 3;
     const y = 395;
     const buttonHeight = 150;
-    labels.forEach(([key, number, label], index) => {
+    labels.forEach(([key, label], index) => {
       const x = 64 + index * (buttonWidth + gap);
       const active = key === this.themeKey;
       const over = key === hovered;
@@ -424,24 +406,11 @@ class WaitingRoom {
       ctx.strokeStyle = active ? accent : (over ? "rgba(255,255,255,.68)" : "rgba(255,255,255,.22)");
       ctx.lineWidth = over ? 4 : 2;
       ctx.strokeRect(x, y, buttonWidth, buttonHeight);
-      ctx.fillStyle = active ? theme.screen : soft;
-      ctx.font = "700 18px 'Courier New', monospace";
-      ctx.fillText(number, x + 20, y + 34);
       ctx.fillStyle = active ? "#ffffff" : "#e2d6cb";
-      ctx.font = "700 24px 'Courier New', monospace";
-      ctx.fillText(label, x + 20, y + 91);
-      ctx.fillStyle = active ? theme.screen : soft;
-      ctx.font = "700 14px 'Courier New', monospace";
-      ctx.fillText(active ? "● ACTIVE" : "○ STANDBY", x + 20, y + 126);
+      ctx.font = "28px Arial, sans-serif";
+      ctx.fillText(label, x + 24, y + 88);
       this.buttonRegions.push({ key, x, y, width: buttonWidth, height: buttonHeight });
     });
-
-    ctx.fillStyle = soft;
-    ctx.font = "700 15px 'Courier New', monospace";
-    ctx.fillText("POINTER / TOUCH", 64, 616);
-    ctx.textAlign = "right";
-    ctx.fillText("THE OWLS ARE NOT WHAT THEY SEEM", width - 64, 616);
-    ctx.textAlign = "left";
 
     ctx.globalAlpha = .07;
     ctx.fillStyle = "#fff";
@@ -680,7 +649,6 @@ class WaitingRoom {
     });
     this.dustPoints.material.color.setHex(theme.lamp);
     document.documentElement.style.setProperty("--signal-red", theme.ui);
-    document.querySelector("#themeAnnouncement").textContent = `Выбран вариант: ${theme.label}`;
     this.glitchPulse = 1;
     this.drawBoard();
   }
@@ -739,12 +707,6 @@ class WaitingRoom {
     const glitchY = glitching ? `${random(-.7, .7).toFixed(2)}px` : "0px";
     document.documentElement.style.setProperty("--glitch-x", glitchX);
     document.documentElement.style.setProperty("--glitch-y", glitchY);
-    if (glitching && this.frame % 3 === 0) {
-      document.querySelector("#signalStatus").textContent = "SIGNAL UNKNOWN";
-    } else if (!glitching) {
-      document.querySelector("#signalStatus").textContent = "SIGNAL STABLE";
-    }
-
     if (this.frame % 3 === 0 && this.pointerNdc.x <= 1) this.updateBoardHover();
   }
 
