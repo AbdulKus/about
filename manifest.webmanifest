@@ -1,0 +1,12 @@
+{
+  "name": "ABOUT — The Private Room",
+  "short_name": "ABOUT",
+  "description": "Интерактивная комната между сном и сигналом.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#090002",
+  "theme_color": "#120004"
+}

@@ -472,7 +472,7 @@ class PrivateRoom {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(3.15, 5.1);
+    texture.repeat.set(3.15, 10.5);
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -577,9 +577,9 @@ class PrivateRoom {
   }
 
   createRoom() {
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 52), this.floorMaterial);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 70), this.floorMaterial);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, 6);
+    floor.position.set(0, 0, 15);
     floor.receiveShadow = true;
     this.scene.add(floor);
     this.floor = floor;
@@ -590,14 +590,14 @@ class PrivateRoom {
     this.scene.add(back);
     this.curtains.push(back);
 
-    const left = this.createCurtain(54, 46, 320, this.curtainDarkMaterial);
-    left.position.set(-11.85, 15.1, 5.5);
+    const left = this.createCurtain(74, 46, 380, this.curtainDarkMaterial);
+    left.position.set(-11.85, 15.1, 14);
     left.rotation.y = Math.PI / 2;
     this.scene.add(left);
     this.curtains.push(left);
 
-    const right = this.createCurtain(54, 46, 320, this.curtainDarkMaterial);
-    right.position.set(11.85, 15.1, 5.5);
+    const right = this.createCurtain(74, 46, 380, this.curtainDarkMaterial);
+    right.position.set(11.85, 15.1, 14);
     right.rotation.y = -Math.PI / 2;
     this.scene.add(right);
     this.curtains.push(right);
@@ -766,6 +766,7 @@ class PrivateRoom {
     [
       { panel: "main", kind: "camera", id: "approach", label: "ПОДОЙТИ", x: -1.73, y: 4.15, rotation: -.027, fontSize: 78 },
       { panel: "main", kind: "camera", id: "observe", label: "ОСМОТРЕТЬСЯ", x: 1.73, y: 4.08, rotation: .032, fontSize: 62 },
+      { panel: "main", kind: "fullscreen", id: "fullscreen", label: "ПОЛНЫЙ ЭКРАН", x: 1.73, y: 2.76, rotation: -.018, width: 2.62, height: .72, fontSize: 49 },
       { panel: "contacts", kind: "link", id: "telegram", label: "ТЕЛЕГРАМ", x: -1.3, y: 4.08, rotation: -.025, width: 2.18, height: 1.08, fontSize: 68, href: this.contactLinks.telegram },
       { panel: "contacts", kind: "link", id: "github", label: "ГИТХАБ", x: 1.3, y: 4.08, rotation: .022, width: 2.18, height: 1.08, fontSize: 82, href: this.contactLinks.github },
       { panel: "contacts", kind: "back", id: "back", label: "НАЗАД", x: -2.78, y: 2.65, rotation: .025, width: 1.3, height: .62, fontSize: 76, accent: "#754553", accentSoft: "rgba(117,69,83,.32)", ink: "#653745", paperColor: "#cfc5b3" }
@@ -979,7 +980,7 @@ class PrivateRoom {
     for (let index = 0; index < count; index += 1) {
       positions[index * 3] = random(-10.5, 10.5);
       positions[index * 3 + 1] = random(.3, 9.5);
-      positions[index * 3 + 2] = random(-9.5, 29);
+      positions[index * 3 + 2] = random(-9.5, 46);
       phases[index] = random(0, Math.PI * 2);
     }
     const geometry = new THREE.BufferGeometry();
@@ -1025,6 +1026,8 @@ class PrivateRoom {
       const button = this.pickBoardButton();
       if (button?.kind === "camera") {
         this.setCameraMode(this.cameraMode === button.id ? "default" : button.id);
+      } else if (button?.kind === "fullscreen") {
+        this.toggleFullscreen();
       } else if (button?.kind === "back") {
         this.setCameraMode("default");
       } else if (button?.kind === "link") {
@@ -1069,6 +1072,14 @@ class PrivateRoom {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) this.clock.getDelta();
     });
+
+    const handleFullscreenChange = () => {
+      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fullscreenElement) screen.orientation?.unlock?.();
+      window.setTimeout(() => this.resize(), 80);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 
     window.addEventListener("pageshow", (event) => {
       if (event.persisted || document.body.classList.contains("is-transitioning") || sessionStorage.getItem("about-return-to-contacts") === "1") {
@@ -1145,6 +1156,37 @@ class PrivateRoom {
     this.mobileControls?.querySelectorAll(".mobile-stick__knob").forEach((knob) => {
       knob.style.transform = "translate(-50%, -50%)";
     });
+  }
+
+  async toggleFullscreen() {
+    const root = document.documentElement;
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+    try {
+      if (fullscreenElement) {
+        screen.orientation?.unlock?.();
+        const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen;
+        await exitFullscreen?.call(document);
+      } else {
+        const requestFullscreen = root.requestFullscreen || root.webkitRequestFullscreen;
+        if (!requestFullscreen) return;
+        if (root.requestFullscreen) {
+          await root.requestFullscreen({ navigationUI: "hide" });
+        } else {
+          await requestFullscreen.call(root);
+        }
+        if (this.isTouch && screen.orientation?.lock) {
+          try {
+            await screen.orientation.lock("landscape");
+          } catch {
+            // Some mobile browsers expose the API but do not allow locking it.
+          }
+        }
+      }
+      this.glitch = Math.max(this.glitch, .42);
+      window.setTimeout(() => this.resize(), 100);
+    } catch {
+      this.glitch = Math.max(this.glitch, .65);
+    }
   }
 
   pickBoardButton() {
@@ -1271,7 +1313,7 @@ class PrivateRoom {
   }
 
   isWalkBlocked(x, z) {
-    if (x < -10.55 || x > 10.55 || z < -8.95 || z > 29.2) return true;
+    if (x < -10.55 || x > 10.55 || z < -8.95 || z > 47.2) return true;
     const inside = (centerX, centerZ, radiusX, radiusZ) => (
       Math.abs(x - centerX) < radiusX && Math.abs(z - centerZ) < radiusZ
     );
@@ -1393,7 +1435,7 @@ class PrivateRoom {
     this.camera.updateProjectionMatrix();
     this.mobileLayout = width / height < .84;
     this.cameraEnd = new THREE.Vector3(0, this.mobileLayout ? 5.35 : 4.85, this.mobileLayout ? 18.8 : 13.6);
-    this.cameraStart = new THREE.Vector3(0, this.mobileLayout ? 5.72 : 5.18, this.mobileLayout ? 30.2 : 27.4);
+    this.cameraStart = new THREE.Vector3(0, this.mobileLayout ? 5.85 : 5.28, this.mobileLayout ? 45.8 : 42.5);
     this.lookTarget = new THREE.Vector3(0, this.mobileLayout ? 3.55 : 3.25, -3.45);
   }
 
@@ -1444,7 +1486,7 @@ class PrivateRoom {
       return;
     }
     if (this.introActive) {
-      this.intro = Math.min(1, this.intro + delta * (this.reduceMotion ? 1.35 : .34));
+      this.intro = Math.min(1, this.intro + delta * (this.reduceMotion ? 1.35 : .24));
       if (this.intro >= 1) this.introActive = false;
     }
     const introEase = this.intro * this.intro * (3 - 2 * this.intro);
