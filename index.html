@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#120004">
+  <meta name="description" content="ABOUT — интерактивная комната между сном и сигналом.">
+  <title>ABOUT — THE PRIVATE ROOM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Neucha&display=swap&subset=cyrillic" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=14">
+</head>
+<body>
+  <div class="room-loader" aria-hidden="true">
+    <div class="loader-curtain">
+      <div class="loader-curtain-relief"></div>
+    </div>
+  </div>
+
+  <canvas id="world" aria-label="Интерактивная сюрреалистическая красная комната"></canvas>
+  <div id="transitionBlackout" class="transition-blackout" aria-hidden="true"></div>
+
+  <div class="screen-effects" aria-hidden="true">
+    <div class="scanlines"></div>
+    <div class="noise"></div>
+    <div class="signal-tear"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <div id="mobileControls" class="mobile-controls" data-overlay-ui aria-hidden="true">
+    <div class="mobile-stick mobile-stick--move" data-stick="move" role="application" aria-label="Стик движения">
+      <span class="mobile-stick__ring">
+        <span class="mobile-stick__knob"></span>
+      </span>
+    </div>
+    <div class="mobile-stick mobile-stick--look" data-stick="look" role="application" aria-label="Стик обзора">
+      <span class="mobile-stick__ring">
+        <span class="mobile-stick__knob"></span>
+      </span>
+    </div>
+    <button class="mobile-walk-exit" type="button" aria-label="Закончить прогулку">×</button>
+  </div>
+
+  <noscript>
+    <p class="noscript">Для входа в комнату необходим JavaScript.</p>
+  </noscript>
+
+  <script type="module" src="scene.js?v=14"></script>
+</body>
+</html>
