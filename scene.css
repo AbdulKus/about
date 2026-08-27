@@ -28,8 +28,7 @@ body {
 .signal-layer,
 .scanlines,
 .grain,
-.vignette,
-.loader {
+.vignette {
   position: fixed;
   inset: 0;
   width: 100%;
@@ -50,71 +49,6 @@ body {
 
 #world.is-interactive {
   cursor: pointer;
-}
-
-.loader {
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  color: #f0d8c1;
-  background:
-    linear-gradient(90deg, transparent 0 48%, rgba(255, 255, 255, .035) 50%, transparent 52%),
-    repeating-linear-gradient(90deg, #280007 0 4%, #5f0012 7%, #8e001d 10%, #4a000d 14%);
-  transition: opacity 1100ms cubic-bezier(.22, 1, .36, 1), visibility 0s linear 1100ms;
-}
-
-.loader::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle, transparent 0 15%, rgba(0, 0, 0, .82) 84%);
-}
-
-.loader-mark {
-  position: relative;
-  z-index: 1;
-  width: min(320px, calc(100vw - 48px));
-  padding: 21px 24px 18px;
-  border: 1px solid rgba(229, 188, 144, .38);
-  background: rgba(8, 2, 4, .78);
-  box-shadow: 0 18px 80px #000;
-  letter-spacing: .2em;
-  text-align: center;
-}
-
-.loader-mark span {
-  display: block;
-  font: 700 12px/1.2 "Courier New", monospace;
-}
-
-.loader-mark i {
-  display: block;
-  width: 100%;
-  height: 2px;
-  margin: 15px 0 12px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, .12);
-}
-
-.loader-mark i::after {
-  content: "";
-  display: block;
-  width: 34%;
-  height: 100%;
-  background: var(--signal-red);
-  box-shadow: 0 0 11px var(--signal-red);
-  animation: loader-scan 1.15s ease-in-out infinite alternate;
-}
-
-.loader-mark small {
-  color: rgba(240, 216, 193, .62);
-  font: 700 8px/1 "Courier New", monospace;
-}
-
-body.scene-ready .loader {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
 }
 
 .signal-layer,
@@ -177,62 +111,6 @@ body.glitching .signal-layer {
     linear-gradient(180deg, rgba(0, 0, 0, .3), transparent 19% 75%, rgba(0, 0, 0, .55));
 }
 
-.signal-id,
-.scene-hint {
-  position: fixed;
-  z-index: 10;
-  margin: 0;
-  color: rgba(239, 218, 197, .58);
-  font: 700 8px/1 "Courier New", monospace;
-  letter-spacing: .15em;
-  text-shadow: 0 1px 4px #000;
-  pointer-events: none;
-  transition: opacity 500ms ease;
-}
-
-.signal-id {
-  top: max(14px, env(safe-area-inset-top));
-  left: max(17px, env(safe-area-inset-left));
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.signal-id b {
-  color: var(--signal-red);
-  font-size: 11px;
-  text-shadow: 0 0 8px var(--signal-red);
-}
-
-.signal-id i {
-  width: 17px;
-  height: 1px;
-  background: rgba(239, 218, 197, .3);
-}
-
-.scene-hint {
-  right: 0;
-  bottom: max(17px, env(safe-area-inset-bottom));
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  text-align: center;
-}
-
-.scene-hint i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--signal-red);
-  box-shadow: 0 0 8px var(--signal-red);
-}
-
-body.board-hover .scene-hint {
-  color: rgba(255, 232, 210, .86);
-}
-
 .sr-only {
   position: fixed;
   width: 1px;
@@ -245,35 +123,12 @@ body.board-hover .scene-hint {
   border: 0;
 }
 
-.noscript {
-  position: fixed;
-  z-index: 100;
-  top: 20px;
-  left: 20px;
-  margin: 0;
-  padding: 12px 15px;
-  color: #f6ded0;
-  border: 1px solid #5d1725;
-  background: #140309;
-  font: 12px/1.4 "Courier New", monospace;
-}
-
 body.scene-fallback::before {
-  content: "THE ROOM IS TEMPORARILY CLOSED";
+  content: "";
   position: fixed;
   z-index: 90;
   inset: 0;
-  display: grid;
-  place-items: center;
-  color: #e8cdb7;
   background: #090204;
-  font: 700 12px/1.4 "Courier New", monospace;
-  letter-spacing: .18em;
-}
-
-@keyframes loader-scan {
-  from { transform: translateX(0); }
-  to { transform: translateX(194%); }
 }
 
 @keyframes grain-jump {
@@ -285,26 +140,13 @@ body.scene-fallback::before {
 }
 
 @media (max-width: 680px) {
-  .scene-hint {
-    bottom: max(12px, env(safe-area-inset-bottom));
-    font-size: 7px;
-    letter-spacing: .1em;
-  }
-
-  .signal-id {
-    top: max(10px, env(safe-area-inset-top));
-    left: max(11px, env(safe-area-inset-left));
-    font-size: 7px;
-  }
-
   .grain {
     opacity: .09;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .grain,
-  .loader-mark i::after {
+  .grain {
     animation: none;
   }
 
