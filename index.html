@@ -54,18 +54,21 @@
     (() => {
       const originalFillText = CanvasRenderingContext2D.prototype.fillText;
       CanvasRenderingContext2D.prototype.fillText = function (text, x, y, maxWidth) {
-        const isFullscreenLabel = text === "ПОЛНЫЙ ЭКРАН";
-        const previousFont = this.font;
-        if (isFullscreenLabel) {
-          this.font = previousFont.replace(/\d+(?:\.\d+)?px/, "72px");
-        }
-        try {
+        if (text !== "ПОЛНЫЙ ЭКРАН") {
           return maxWidth === undefined
             ? originalFillText.call(this, text, x, y)
             : originalFillText.call(this, text, x, y, maxWidth);
-        } finally {
-          if (isFullscreenLabel) this.font = previousFont;
         }
+
+        // The fullscreen paper mesh is much wider than the 640x300 source
+        // canvas, so pre-compress the label horizontally to keep its final
+        // proportions natural after the texture is mapped onto the mesh.
+        this.save();
+        this.font = this.font.replace(/\d+(?:\.\d+)?px/, "86px");
+        this.translate(x, y);
+        this.scale(0.586, 1);
+        originalFillText.call(this, text, 0, 0);
+        this.restore();
       };
     })();
   </script>
