@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="ABOUT — интерактивная комната между сном и сигналом.">
-  <title>ABOUT — THE PRIVATE ROOM</title>
+  <title>about</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Neucha&display=swap&subset=cyrillic" rel="stylesheet">
@@ -50,6 +50,25 @@
     <p class="noscript">Для входа в комнату необходим JavaScript.</p>
   </noscript>
 
+  <script>
+    (() => {
+      const originalFillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function (text, x, y, maxWidth) {
+        const isFullscreenLabel = text === "ПОЛНЫЙ ЭКРАН";
+        const previousFont = this.font;
+        if (isFullscreenLabel) {
+          this.font = previousFont.replace(/\d+(?:\.\d+)?px/, "72px");
+        }
+        try {
+          return maxWidth === undefined
+            ? originalFillText.call(this, text, x, y)
+            : originalFillText.call(this, text, x, y, maxWidth);
+        } finally {
+          if (isFullscreenLabel) this.font = previousFont;
+        }
+      };
+    })();
+  </script>
   <script type="module" src="scene.js?v=15"></script>
 </body>
 </html>
