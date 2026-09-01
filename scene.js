@@ -847,7 +847,7 @@ class PrivateRoom {
 
   createLiminalCorridors(endZ, passageHeight) {
     this.liminalSeed = Math.random() * 10000;
-    this.liminalCenterZ = endZ + 2.7;
+    this.liminalCenterZ = endZ + 3.6;
     this.liminalDoorZ = endZ - .18;
     this.liminalDistortionMeshes = [];
     this.liminalGlitchSlices = [];
@@ -858,42 +858,23 @@ class PrivateRoom {
     this.scene.add(level);
     this.liminalLevel = level;
 
-    this.liminalDoorPivot = new THREE.Group();
-    this.liminalDoorPivot.position.set(-1.72, 0, this.liminalDoorZ);
-    level.add(this.liminalDoorPivot);
+    this.liminalCurtainGate = new THREE.Group();
+    this.liminalCurtainGate.position.set(0, 0, this.liminalDoorZ);
+    level.add(this.liminalCurtainGate);
 
-    const door = new THREE.Mesh(new THREE.BoxGeometry(3.44, 6.18, .2), this.woodMaterial);
-    door.position.set(1.72, 3.09, 0);
-    door.castShadow = true;
-    door.receiveShadow = true;
-    this.liminalDoorPivot.add(door);
-    this.liminalDoorMesh = door;
+    const gateLeftMaterial = this.curtainMaterial.clone();
+    const gateRightMaterial = this.curtainDarkMaterial.clone();
+    this.liminalCurtainLeft = this.createLiminalCurtain(2.16, 6.5, gateLeftMaterial, this.liminalSeed + 14);
+    this.liminalCurtainRight = this.createLiminalCurtain(2.16, 6.5, gateRightMaterial, this.liminalSeed + 29);
+    this.liminalCurtainLeftBaseX = -1.02;
+    this.liminalCurtainRightBaseX = 1.02;
+    this.liminalCurtainLeft.position.set(this.liminalCurtainLeftBaseX, 3.25, 0);
+    this.liminalCurtainRight.position.set(this.liminalCurtainRightBaseX, 3.25, -.015);
+    this.liminalCurtainGate.add(this.liminalCurtainLeft, this.liminalCurtainRight);
 
-    [1.65, 4.62].forEach((panelY) => {
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(2.58, 2.3, .1), this.woodHorizontalMaterial);
-      panel.position.set(1.72, panelY, -.145);
-      panel.castShadow = true;
-      this.liminalDoorPivot.add(panel);
-    });
-
-    const handleBase = new THREE.Mesh(new THREE.CylinderGeometry(.16, .16, .07, 18), this.brassMaterial);
-    handleBase.rotation.x = Math.PI / 2;
-    handleBase.position.set(3.02, 3.1, -.16);
-    this.liminalDoorPivot.add(handleBase);
-    const handle = new THREE.Mesh(new THREE.SphereGeometry(.11, 16, 10), this.brassMaterial);
-    handle.position.set(3.02, 3.1, -.27);
-    handle.castShadow = true;
-    this.liminalDoorPivot.add(handle);
-
-    this.liminalSealCurtain = this.createLiminalCurtain(
-      3.6,
-      6.34,
-      this.curtainDarkMaterial,
-      this.liminalSeed + 14
-    );
-    this.liminalSealCurtain.position.set(0, 3.17, endZ + .035);
-    this.liminalSealCurtain.visible = false;
-    level.add(this.liminalSealCurtain);
+    const gateValance = this.createLiminalCurtain(4.15, 1.18, this.curtainDarkMaterial.clone(), this.liminalSeed + 43);
+    gateValance.position.set(0, 6.58, .025);
+    this.liminalCurtainGate.add(gateValance);
 
     const landingMaterial = this.floorMaterial.clone();
     landingMaterial.color = new THREE.Color(0xd8cfba);
@@ -934,7 +915,8 @@ class PrivateRoom {
     const leftCurtainMaterialB = this.curtainDarkMaterial.clone();
     const leftCurtainA = this.createLiminalCurtain(leftLength, 7.15, leftCurtainMaterialA, this.liminalSeed + 31);
     const leftCurtainB = this.createLiminalCurtain(leftLength, 7.15, leftCurtainMaterialB, this.liminalSeed + 79);
-    leftCurtainA.position.set(-leftLength * .5, 3.575, this.liminalCenterZ - 3.25);
+    leftCurtainA.scale.x = .965;
+    leftCurtainA.position.set(-leftLength * .5 - 2.7, 3.575, this.liminalCenterZ - 3.25);
     leftCurtainB.position.set(-leftLength * .5, 3.575, this.liminalCenterZ + 3.25);
     level.add(leftCurtainA, leftCurtainB);
     this.registerLiminalDistortion(leftCurtainA, "curtainA");
@@ -996,6 +978,10 @@ class PrivateRoom {
       const curtainB = this.createLiminalCurtain(segmentLength + .12, height, this.curtainDarkMaterial, this.liminalSeed + 200 + index * 4.7);
       curtainA.position.set(0, height * .5, -halfWidth);
       curtainB.position.set(0, height * .5, halfWidth);
+      if (index === 0) {
+        curtainA.scale.x = .3;
+        curtainA.position.x = 2.45;
+      }
       segment.add(curtainA, curtainB);
 
       level.add(segment);
@@ -1044,12 +1030,12 @@ class PrivateRoom {
     this.glitch = Math.max(this.glitch, .32);
     if (this.doorPrompt) {
       const label = this.doorPrompt.querySelector("span");
-      if (label) label.textContent = "ОТКРЫВАЕТСЯ";
+      if (label) label.textContent = "РАЗДВИГАЕТСЯ";
     }
   }
 
   updateDoorPrompt() {
-    if (!this.doorPrompt || !this.liminalDoorPivot) return;
+    if (!this.doorPrompt || !this.liminalCurtainGate) return;
     const point = new THREE.Vector3(0, 3.15, this.liminalDoorZ - .2);
     const distance = this.camera.position.distanceTo(point);
     const active = this.freeCameraEnabled
@@ -1079,22 +1065,29 @@ class PrivateRoom {
       delta
     );
     const doorEase = this.liminalDoorOpenAmount * this.liminalDoorOpenAmount * (3 - 2 * this.liminalDoorOpenAmount);
-    if (this.liminalDoorPivot?.visible) {
-      this.liminalDoorPivot.rotation.y = -doorEase * 1.52;
-      this.liminalDoorPivot.position.z = this.liminalDoorZ + Math.sin(doorEase * Math.PI) * .035;
+    if (this.liminalCurtainLeft && this.liminalCurtainRight) {
+      const gather = 1 - doorEase * .4;
+      const breathe = Math.sin(this.elapsed * 3.1) * .018 * doorEase;
+      this.liminalCurtainLeft.position.x = lerp(this.liminalCurtainLeftBaseX, -2.42, doorEase);
+      this.liminalCurtainRight.position.x = lerp(this.liminalCurtainRightBaseX, 2.42, doorEase);
+      this.liminalCurtainLeft.position.z = Math.sin(doorEase * Math.PI) * .09 + breathe;
+      this.liminalCurtainRight.position.z = Math.sin(doorEase * Math.PI) * .075 - breathe;
+      this.liminalCurtainLeft.scale.x = gather;
+      this.liminalCurtainRight.scale.x = gather;
+      this.liminalCurtainLeft.rotation.z = -.028 * doorEase;
+      this.liminalCurtainRight.rotation.z = .028 * doorEase;
     }
     this.updateDoorPrompt();
 
     if (!this.liminalEntered
       && this.liminalDoorOpenAmount > .72
-      && this.freeCameraPosition.z > this.liminalDoorZ + .68) {
+      && this.freeCameraPosition.z > this.liminalDoorZ + 1.02) {
       this.liminalEntered = true;
-      this.liminalDoorPivot.visible = false;
-      this.liminalSealCurtain.visible = true;
+      this.liminalDoorTarget = 0;
       this.liminalPromptActive = false;
       this.doorPrompt?.classList.remove("is-visible");
       const label = this.doorPrompt?.querySelector("span");
-      if (label) label.textContent = "ОТКРЫТЬ";
+      if (label) label.textContent = "РАЗДВИНУТЬ";
       this.glitch = Math.max(this.glitch, .46);
     }
 
@@ -1866,6 +1859,7 @@ class PrivateRoom {
     }
 
     if (!this.liminalEntered && this.liminalDoorOpenAmount < .7) return true;
+    if (this.liminalEntered && z < this.liminalDoorZ + .42) return true;
     if (z < 68.35 && Math.abs(x) > 1.62) return true;
 
     const centerZ = this.liminalCenterZ || 70.7;
