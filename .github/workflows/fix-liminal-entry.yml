@@ -1,0 +1,30 @@
+name: Fix liminal entry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-liminal-entry.yml'
+      - '.github/patches/fix_liminal_entry.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch scene
+        run: python3 .github/patches/fix_liminal_entry.py
+      - name: Check JavaScript syntax
+        run: node --check scene.js
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scene.js index.html
+          git commit -m "Fix liminal curtain entry and progressive distortion"
+          git push origin main
