@@ -863,7 +863,7 @@ class PrivateRoom {
     level.add(this.liminalCurtainGate);
 
     const gateLeftMaterial = this.curtainMaterial.clone();
-    const gateRightMaterial = this.curtainDarkMaterial.clone();
+    const gateRightMaterial = this.curtainMaterial.clone();
     this.liminalCurtainLeft = this.createLiminalCurtain(2.16, 6.5, gateLeftMaterial, this.liminalSeed + 14);
     this.liminalCurtainRight = this.createLiminalCurtain(2.16, 6.5, gateRightMaterial, this.liminalSeed + 29);
     this.liminalCurtainLeftBaseX = -1.02;
@@ -872,12 +872,18 @@ class PrivateRoom {
     this.liminalCurtainRight.position.set(this.liminalCurtainRightBaseX, 3.25, -.015);
     this.liminalCurtainGate.add(this.liminalCurtainLeft, this.liminalCurtainRight);
 
-    const gateValance = this.createLiminalCurtain(4.15, 1.18, this.curtainDarkMaterial.clone(), this.liminalSeed + 43);
+    const gateValance = this.createLiminalCurtain(4.15, 1.18, this.curtainMaterial.clone(), this.liminalSeed + 43);
     gateValance.position.set(0, 6.58, .025);
     this.liminalCurtainGate.add(gateValance);
 
     const landingMaterial = this.floorMaterial.clone();
-    landingMaterial.color = new THREE.Color(0xd8cfba);
+    landingMaterial.color = new THREE.Color(0xf1e5ca);
+    landingMaterial.map = this.floorMaterial.map?.clone() || null;
+    if (landingMaterial.map) {
+      landingMaterial.map.wrapS = landingMaterial.map.wrapT = THREE.RepeatWrapping;
+      landingMaterial.map.repeat.set(3.9, 10.5);
+      landingMaterial.map.needsUpdate = true;
+    }
     const landing = new THREE.Mesh(new THREE.BoxGeometry(8.4, .12, 6.7), landingMaterial);
     landing.position.set(0, .02, this.liminalCenterZ);
     landing.receiveShadow = true;
@@ -897,7 +903,7 @@ class PrivateRoom {
     leftFloorMaterial.map = this.floorMaterial.map?.clone() || null;
     if (leftFloorMaterial.map) {
       leftFloorMaterial.map.wrapS = leftFloorMaterial.map.wrapT = THREE.RepeatWrapping;
-      leftFloorMaterial.map.repeat.set(22, 3.4);
+      leftFloorMaterial.map.repeat.set(71.3, 10.5);
       leftFloorMaterial.map.needsUpdate = true;
     }
     this.liminalLeftFloorMaterial = leftFloorMaterial;
@@ -912,18 +918,17 @@ class PrivateRoom {
     this.registerLiminalDistortion(leftFloor, "floor");
 
     const leftCurtainMaterialA = this.curtainMaterial.clone();
-    const leftCurtainMaterialB = this.curtainDarkMaterial.clone();
+    const leftCurtainMaterialB = this.curtainMaterial.clone();
     const leftCurtainA = this.createLiminalCurtain(leftLength, 7.15, leftCurtainMaterialA, this.liminalSeed + 31);
     const leftCurtainB = this.createLiminalCurtain(leftLength, 7.15, leftCurtainMaterialB, this.liminalSeed + 79);
-    leftCurtainA.scale.x = .965;
-    leftCurtainA.position.set(-leftLength * .5 - 2.7, 3.575, this.liminalCenterZ - 3.25);
+    leftCurtainA.position.set(-leftLength * .5, 3.575, this.liminalCenterZ - 3.25);
     leftCurtainB.position.set(-leftLength * .5, 3.575, this.liminalCenterZ + 3.25);
     level.add(leftCurtainA, leftCurtainB);
     this.registerLiminalDistortion(leftCurtainA, "curtainA");
     this.registerLiminalDistortion(leftCurtainB, "curtainB");
 
     for (let index = 0; index < 15; index += 1) {
-      const x = -10 - index * 9.2;
+      const x = -26 - index * 9.2;
       const rib = new THREE.Group();
       rib.position.set(x, 0, this.liminalCenterZ);
       const mat = new THREE.MeshStandardMaterial({
@@ -944,14 +949,14 @@ class PrivateRoom {
         group: rib,
         baseX: x,
         phase: this.liminalSeed * .01 + index * 1.77,
-        strength: clamp((-x - 8) / 140, 0, 1)
+        strength: clamp((-x - 20) / 124, 0, 1)
       });
     }
 
     const segmentLength = 6.8;
     const segmentCount = 22;
     for (let index = 0; index < segmentCount; index += 1) {
-      const t = index / (segmentCount - 1);
+      const t = clamp((index - 3) / (segmentCount - 4), 0, 1);
       const x = index * segmentLength + segmentLength * .5;
       const halfWidth = Math.max(.38, 3.2 * (1 - t * .88));
       const height = Math.max(2.05, 7.05 * (1 - t * .69));
@@ -975,13 +980,9 @@ class PrivateRoom {
       segment.add(ceiling);
 
       const curtainA = this.createLiminalCurtain(segmentLength + .12, height, this.curtainMaterial, this.liminalSeed + index * 3.1);
-      const curtainB = this.createLiminalCurtain(segmentLength + .12, height, this.curtainDarkMaterial, this.liminalSeed + 200 + index * 4.7);
+      const curtainB = this.createLiminalCurtain(segmentLength + .12, height, this.curtainMaterial, this.liminalSeed + 200 + index * 4.7);
       curtainA.position.set(0, height * .5, -halfWidth);
       curtainB.position.set(0, height * .5, halfWidth);
-      if (index === 0) {
-        curtainA.scale.x = .3;
-        curtainA.position.x = 2.45;
-      }
       segment.add(curtainA, curtainB);
 
       level.add(segment);
@@ -1094,26 +1095,27 @@ class PrivateRoom {
     if (!this.liminalEntered) return;
 
     const x = this.freeCameraPosition.x;
-    const leftDepth = clamp((-x - 8) / 140, 0, 1);
+    const leftDepth = clamp((-x - 16) / 128, 0, 1);
+    const leftEase = leftDepth * leftDepth * (3 - 2 * leftDepth);
     const velocityX = this.freeCameraVelocity.x;
     const velocityZ = this.freeCameraVelocity.z;
     const time = this.elapsed;
     const seed = this.liminalSeed;
 
-    if (x < -7) {
+    if (x < -12) {
       const modeA = Math.sin(seed * .017) > 0 ? 1 : -1;
       const modeB = Math.sin(seed * .041 + 2) > 0 ? 1 : -1;
       if (this.liminalLeftFloorMaterial?.map) {
         const map = this.liminalLeftFloorMaterial.map;
         const autonomous = Math.sin(seed * .003) * .19;
         map.offset.x += delta * (
-          velocityX * .018 * modeA
-          + autonomous * leftDepth
-          + Math.sin(time * .7 + seed) * .012 * leftDepth
+          velocityX * .018 * modeA * leftEase
+          + autonomous * leftEase
+          + Math.sin(time * .7 + seed) * .012 * leftEase
         );
         map.offset.y += delta * (
-          velocityZ * .02 * modeB
-          + Math.cos(time * .46 + seed * .3) * .018 * leftDepth
+          velocityZ * .02 * modeB * leftEase
+          + Math.cos(time * .46 + seed * .3) * .018 * leftEase
         );
       }
 
@@ -1128,7 +1130,7 @@ class PrivateRoom {
           const baseZ = base[i * 3 + 2];
           const worldX = record.mesh.position.x + baseX;
           const depth = clamp((-worldX - 8) / 142, 0, 1);
-          const late = Math.pow(depth, 2.15);
+          const late = Math.pow(depth, 2.15) * leftEase;
           const phase = record.phase + meshIndex * 1.31;
           const pulse = Math.sin(time * (1.05 + depth * 2.8) + baseX * .12 + phase);
           const coarse = Math.sin(time * .36 + Math.floor(baseX / 4.8) * 2.4 + phase);
@@ -1138,14 +1140,14 @@ class PrivateRoom {
             array[i * 3] = baseX + Math.sin(baseY * .8 + time + phase) * .16 * late;
             array[i * 3 + 1] = baseY + Math.sin(baseX * .21 - time * .72 + phase) * .45 * late;
             array[i * 3 + 2] = baseZ
-              + pulse * (.12 + late * 1.18)
+              + pulse * late * 1.3
               + coarse * late * .65
               + jump * late * .38;
           } else {
             array[i * 3] = baseX + Math.sin(baseY * .55 + time * .8 + phase) * .22 * late;
             array[i * 3 + 1] = baseY + Math.sin(baseX * .17 + time * .52 + phase) * .28 * late;
             array[i * 3 + 2] = baseZ
-              + pulse * (.16 + late * 1.42)
+              + pulse * late * 1.58
               + coarse * late * .82
               + jump * late * .55;
           }
@@ -1157,7 +1159,7 @@ class PrivateRoom {
       });
 
       this.liminalGlitchSlices.forEach((slice, index) => {
-        const local = Math.pow(slice.strength, 1.45) * leftDepth;
+        const local = Math.pow(slice.strength, 1.45) * leftEase;
         const lagGate = Math.sin(time * (1.1 + index * .07) + slice.phase);
         const snap = lagGate > .78 ? 1 : 0;
         slice.group.position.x = slice.baseX
@@ -1174,11 +1176,12 @@ class PrivateRoom {
 
       if (this.liminalLeftLight) {
         const badFlicker = Math.sin(time * 13.7 + seed) > .72 ? .25 : 1;
-        this.liminalLeftLight.intensity = (7.5 + Math.sin(time * 1.8 + seed) * 2.1) * (1 - leftDepth * .45) * badFlicker;
-        this.liminalLeftLight.position.z = this.liminalCenterZ + Math.sin(time * .51 + seed) * leftDepth * 1.4;
+        const flickerMix = lerp(1, badFlicker, leftEase);
+        this.liminalLeftLight.intensity = (7.5 + Math.sin(time * 1.8 + seed) * 2.1 * leftEase) * (1 - leftEase * .45) * flickerMix;
+        this.liminalLeftLight.position.z = this.liminalCenterZ + Math.sin(time * .51 + seed) * leftEase * 1.4;
       }
 
-      this.glitch = Math.max(this.glitch, .12 + leftDepth * .92);
+      if (leftEase > .01) this.glitch = Math.max(this.glitch, .12 + leftEase * .92);
     }
 
     if (x > 139 && !this.liminalFall) {
@@ -1858,11 +1861,13 @@ class PrivateRoom {
       return false;
     }
 
-    if (!this.liminalEntered && this.liminalDoorOpenAmount < .7) return true;
+    const centerZ = this.liminalCenterZ || 71.6;
+    if (!this.liminalEntered) {
+      if (this.liminalDoorOpenAmount < .64) return true;
+      if (Math.abs(x) > 1.62 && z < centerZ - 2.25) return true;
+      if (Math.abs(x) <= 1.62 && z < centerZ - .15) return false;
+    }
     if (this.liminalEntered && z < this.liminalDoorZ + .42) return true;
-    if (z < 68.35 && Math.abs(x) > 1.62) return true;
-
-    const centerZ = this.liminalCenterZ || 70.7;
     if (x < -153.5 || x > 151.2) return true;
 
     let halfWidth = 3.18;
