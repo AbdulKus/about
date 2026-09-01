@@ -1,0 +1,30 @@
+name: Unify floors curtains and lamps
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/unify-floors-curtains-lamps.yml'
+      - '.github/patches/unify_floors_curtains_lamps.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch scene
+        run: python3 .github/patches/unify_floors_curtains_lamps.py
+      - name: Check JavaScript syntax
+        run: node --check scene.js
+      - name: Commit visual fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scene.js index.html
+          git commit -m "Unify corridor floors curtains and lighting"
+          git push origin main
