@@ -109,13 +109,14 @@ class PrivateRoom {
     this.scene.background = new THREE.Color(0x090002);
     this.scene.fog = new THREE.FogExp2(0x100004, .026);
 
-    this.camera = new THREE.PerspectiveCamera(43, 1, .1, 80);
+    this.camera = new THREE.PerspectiveCamera(43, 1, .1, 110);
     this.camera.position.set(0, 5.25, 15.8);
 
     this.createMaterials();
     this.createPostProcess();
     this.createLights();
     this.createRoom();
+    this.createBackPassage();
     this.createBoard();
     this.createChairs();
     this.createLamps();
@@ -687,6 +688,123 @@ class PrivateRoom {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+
+  createBackPassage() {
+    const passage = new THREE.Group();
+    passage.name = "rearPassage";
+
+    const startZ = 17.35;
+    const endZ = 68;
+    const length = endZ - startZ;
+    const centerZ = startZ + length * .5;
+    const width = 6.4;
+    const height = 7.15;
+
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x130609,
+      roughness: .96,
+      metalness: .01
+    });
+    const trimMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2b0c12,
+      roughness: .84,
+      metalness: .03
+    });
+    const ceilingMaterial = new THREE.MeshStandardMaterial({
+      color: 0x090405,
+      roughness: .98,
+      metalness: 0
+    });
+
+    const passageFloorMaterial = this.floorMaterial.clone();
+    passageFloorMaterial.color = new THREE.Color(0xd8d0bd);
+    passageFloorMaterial.roughness = .58;
+
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(width, length), passageFloorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(0, .015, centerZ);
+    floor.receiveShadow = true;
+    passage.add(floor);
+
+    const ceiling = new THREE.Mesh(new THREE.BoxGeometry(width, .18, length), ceilingMaterial);
+    ceiling.position.set(0, height, centerZ);
+    ceiling.receiveShadow = true;
+    passage.add(ceiling);
+
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(.24, height, length), wallMaterial);
+    leftWall.position.set(-width * .5, height * .5, centerZ);
+    leftWall.castShadow = true;
+    leftWall.receiveShadow = true;
+    passage.add(leftWall);
+
+    const rightWall = leftWall.clone();
+    rightWall.position.x = width * .5;
+    passage.add(rightWall);
+
+    const endWall = new THREE.Mesh(new THREE.BoxGeometry(width, height, .3), wallMaterial);
+    endWall.position.set(0, height * .5, endZ);
+    endWall.receiveShadow = true;
+    passage.add(endWall);
+
+    const header = new THREE.Mesh(new THREE.BoxGeometry(width + .55, .48, .42), trimMaterial);
+    header.position.set(0, height - .12, startZ + .04);
+    header.castShadow = true;
+    passage.add(header);
+    [-width * .5 - .13, width * .5 + .13].forEach((x) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.46, height, .42), trimMaterial);
+      post.position.set(x, height * .5, startZ + .04);
+      post.castShadow = true;
+      passage.add(post);
+    });
+
+    for (let z = startZ + 6; z < endZ - 7; z += 6.2) {
+      [-width * .5 + .09, width * .5 - .09].forEach((x) => {
+        const rib = new THREE.Mesh(new THREE.BoxGeometry(.34, height - .36, .24), trimMaterial);
+        rib.position.set(x, (height - .36) * .5, z);
+        rib.castShadow = true;
+        passage.add(rib);
+      });
+      const ceilingRib = new THREE.Mesh(new THREE.BoxGeometry(width - .25, .22, .24), trimMaterial);
+      ceilingRib.position.set(0, height - .08, z);
+      passage.add(ceilingRib);
+    }
+
+    const lampZ = endZ - 3.2;
+    const lamp = new THREE.Group();
+    lamp.position.set(0, height - .18, lampZ);
+
+    const cord = new THREE.Mesh(
+      new THREE.CylinderGeometry(.025, .025, 1.05, 8),
+      new THREE.MeshStandardMaterial({ color: 0x171011, roughness: .82 })
+    );
+    cord.position.y = -.5;
+    lamp.add(cord);
+
+    const shade = new THREE.Mesh(
+      new THREE.ConeGeometry(.46, .58, 20, 1, true),
+      this.shadeMaterial
+    );
+    shade.position.y = -1.02;
+    shade.rotation.x = Math.PI;
+    lamp.add(shade);
+
+    const bulbMaterial = new THREE.MeshBasicMaterial({ color: 0xffc37d, toneMapped: false });
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(.115, 16, 12), bulbMaterial);
+    bulb.position.y = -1.18;
+    lamp.add(bulb);
+    passage.add(lamp);
+
+    this.passageEndLight = new THREE.PointLight(0xffa85b, 34, 20, 1.7);
+    this.passageEndLight.position.set(0, height - 1.38, lampZ);
+    this.passageEndLight.castShadow = true;
+    this.passageEndLight.shadow.mapSize.set(512, 512);
+    this.passageEndLight.shadow.bias = -.00035;
+    passage.add(this.passageEndLight);
+
+    this.scene.add(passage);
+    this.backPassage = passage;
   }
 
   createBoard() {
@@ -1313,7 +1431,8 @@ class PrivateRoom {
   }
 
   isWalkBlocked(x, z) {
-    if (x < -10.55 || x > 10.55 || z < -8.95 || z > 47.2) return true;
+    if (x < -10.55 || x > 10.55 || z < -8.95 || z > 67.25) return true;
+    if (z > 17.15 && Math.abs(x) > 2.96) return true;
     const inside = (centerX, centerZ, radiusX, radiusZ) => (
       Math.abs(x - centerX) < radiusX && Math.abs(z - centerZ) < radiusZ
     );
