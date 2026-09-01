@@ -1,5 +1,6 @@
 name: Add rear passage
 
+# Existing workflow updated to trigger the one-time scene patch.
 on:
   push:
     branches: [main]
@@ -91,7 +92,6 @@ jobs:
     endWall.receiveShadow = true;
     passage.add(endWall);
 
-    // A heavy frame makes the opening read as a deliberate passage behind the camera.
     const header = new THREE.Mesh(new THREE.BoxGeometry(width + .55, .48, .42), trimMaterial);
     header.position.set(0, height - .12, startZ + .04);
     header.castShadow = true;
@@ -103,7 +103,6 @@ jobs:
       passage.add(post);
     });
 
-    // Sparse wall ribs exaggerate perspective without adding more lamps.
     for (let z = startZ + 6; z < endZ - 7; z += 6.2) {
       [-width * .5 + .09, width * .5 - .09].forEach((x) => {
         const rib = new THREE.Mesh(new THREE.BoxGeometry(.34, height - .36, .24), trimMaterial);
@@ -116,7 +115,6 @@ jobs:
       passage.add(ceilingRib);
     }
 
-    // The only visible lamp: a small warm pendant near the far end.
     const lampZ = endZ - 3.2;
     const lamp = new THREE.Group();
     lamp.position.set(0, height - .18, lampZ);
