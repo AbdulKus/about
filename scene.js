@@ -39,6 +39,13 @@ class PrivateRoom {
     };
     this.portalSequence = null;
     this.portalTextureTick = 0;
+    this.doorPrompt = document.querySelector("#doorPrompt");
+    this.liminalPromptActive = false;
+    this.liminalDoorTarget = 0;
+    this.liminalDoorOpenAmount = 0;
+    this.liminalEntered = false;
+    this.liminalFall = false;
+    this.liminalFallTime = 0;
     this.shouldRestoreContacts = sessionStorage.getItem("about-return-to-contacts") === "1";
     this.transitionBlackout = document.querySelector("#transitionBlackout");
     this.glitch = 0;
@@ -743,10 +750,22 @@ class PrivateRoom {
     rightWall.position.x = width * .5;
     passage.add(rightWall);
 
-    const endWall = new THREE.Mesh(new THREE.BoxGeometry(width, height, .3), wallMaterial);
-    endWall.position.set(0, height * .5, endZ);
-    endWall.receiveShadow = true;
-    passage.add(endWall);
+    const doorwayWidth = 3.55;
+    const doorwayHeight = 6.3;
+    const sideWidth = (width - doorwayWidth) * .5;
+    [-1, 1].forEach((side) => {
+      const sideWall = new THREE.Mesh(new THREE.BoxGeometry(sideWidth, height, .3), wallMaterial);
+      sideWall.position.set(side * (doorwayWidth * .5 + sideWidth * .5), height * .5, endZ);
+      sideWall.receiveShadow = true;
+      passage.add(sideWall);
+    });
+    const endHeader = new THREE.Mesh(
+      new THREE.BoxGeometry(doorwayWidth, height - doorwayHeight, .3),
+      wallMaterial
+    );
+    endHeader.position.set(0, doorwayHeight + (height - doorwayHeight) * .5, endZ);
+    endHeader.receiveShadow = true;
+    passage.add(endHeader);
 
     const header = new THREE.Mesh(new THREE.BoxGeometry(width + .55, .48, .42), trimMaterial);
     header.position.set(0, height - .12, startZ + .04);
@@ -805,6 +824,395 @@ class PrivateRoom {
 
     this.scene.add(passage);
     this.backPassage = passage;
+    this.createLiminalCorridors(endZ, height);
+  }
+
+  createLiminalCurtain(length, height, material, seed = 0) {
+    const geometry = new THREE.PlaneGeometry(length, height, 22, 18);
+    const position = geometry.attributes.position;
+    for (let index = 0; index < position.count; index += 1) {
+      const x = position.getX(index);
+      const y = position.getY(index);
+      const fold = Math.sin(x * 2.35 + seed) * .24
+        + Math.sin(x * 5.7 - y * .17 + seed * .31) * .065
+        + Math.sin(y * .66 + x * .24 + seed * .73) * .038;
+      position.setZ(index, fold);
+    }
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    return mesh;
+  }
+
+  createLiminalCorridors(endZ, passageHeight) {
+    this.liminalSeed = Math.random() * 10000;
+    this.liminalCenterZ = endZ + 2.7;
+    this.liminalDoorZ = endZ - .18;
+    this.liminalDistortionMeshes = [];
+    this.liminalGlitchSlices = [];
+    this.liminalRightSegments = [];
+
+    const level = new THREE.Group();
+    level.name = "liminalCorridors";
+    this.scene.add(level);
+    this.liminalLevel = level;
+
+    this.liminalDoorPivot = new THREE.Group();
+    this.liminalDoorPivot.position.set(-1.72, 0, this.liminalDoorZ);
+    level.add(this.liminalDoorPivot);
+
+    const door = new THREE.Mesh(new THREE.BoxGeometry(3.44, 6.18, .2), this.woodMaterial);
+    door.position.set(1.72, 3.09, 0);
+    door.castShadow = true;
+    door.receiveShadow = true;
+    this.liminalDoorPivot.add(door);
+    this.liminalDoorMesh = door;
+
+    [1.65, 4.62].forEach((panelY) => {
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(2.58, 2.3, .1), this.woodHorizontalMaterial);
+      panel.position.set(1.72, panelY, -.145);
+      panel.castShadow = true;
+      this.liminalDoorPivot.add(panel);
+    });
+
+    const handleBase = new THREE.Mesh(new THREE.CylinderGeometry(.16, .16, .07, 18), this.brassMaterial);
+    handleBase.rotation.x = Math.PI / 2;
+    handleBase.position.set(3.02, 3.1, -.16);
+    this.liminalDoorPivot.add(handleBase);
+    const handle = new THREE.Mesh(new THREE.SphereGeometry(.11, 16, 10), this.brassMaterial);
+    handle.position.set(3.02, 3.1, -.27);
+    handle.castShadow = true;
+    this.liminalDoorPivot.add(handle);
+
+    this.liminalSealCurtain = this.createLiminalCurtain(
+      3.6,
+      6.34,
+      this.curtainDarkMaterial,
+      this.liminalSeed + 14
+    );
+    this.liminalSealCurtain.position.set(0, 3.17, endZ + .035);
+    this.liminalSealCurtain.visible = false;
+    level.add(this.liminalSealCurtain);
+
+    const landingMaterial = this.floorMaterial.clone();
+    landingMaterial.color = new THREE.Color(0xd8cfba);
+    const landing = new THREE.Mesh(new THREE.BoxGeometry(8.4, .12, 6.7), landingMaterial);
+    landing.position.set(0, .02, this.liminalCenterZ);
+    landing.receiveShadow = true;
+    level.add(landing);
+
+    const ceilingMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0a0305,
+      roughness: .96,
+      metalness: .01
+    });
+    const landingCeiling = new THREE.Mesh(new THREE.BoxGeometry(8.4, .14, 6.7), ceilingMaterial);
+    landingCeiling.position.set(0, passageHeight, this.liminalCenterZ);
+    level.add(landingCeiling);
+
+    const leftLength = 154;
+    const leftFloorMaterial = this.floorMaterial.clone();
+    leftFloorMaterial.map = this.floorMaterial.map?.clone() || null;
+    if (leftFloorMaterial.map) {
+      leftFloorMaterial.map.wrapS = leftFloorMaterial.map.wrapT = THREE.RepeatWrapping;
+      leftFloorMaterial.map.repeat.set(22, 3.4);
+      leftFloorMaterial.map.needsUpdate = true;
+    }
+    this.liminalLeftFloorMaterial = leftFloorMaterial;
+
+    const leftFloorGeometry = new THREE.PlaneGeometry(leftLength, 6.4, 96, 8);
+    const leftFloor = new THREE.Mesh(leftFloorGeometry, leftFloorMaterial);
+    leftFloor.rotation.x = -Math.PI / 2;
+    leftFloor.position.set(-leftLength * .5, .025, this.liminalCenterZ);
+    leftFloor.receiveShadow = true;
+    level.add(leftFloor);
+    this.liminalLeftFloor = leftFloor;
+    this.registerLiminalDistortion(leftFloor, "floor");
+
+    const leftCurtainMaterialA = this.curtainMaterial.clone();
+    const leftCurtainMaterialB = this.curtainDarkMaterial.clone();
+    const leftCurtainA = this.createLiminalCurtain(leftLength, 7.15, leftCurtainMaterialA, this.liminalSeed + 31);
+    const leftCurtainB = this.createLiminalCurtain(leftLength, 7.15, leftCurtainMaterialB, this.liminalSeed + 79);
+    leftCurtainA.position.set(-leftLength * .5, 3.575, this.liminalCenterZ - 3.25);
+    leftCurtainB.position.set(-leftLength * .5, 3.575, this.liminalCenterZ + 3.25);
+    level.add(leftCurtainA, leftCurtainB);
+    this.registerLiminalDistortion(leftCurtainA, "curtainA");
+    this.registerLiminalDistortion(leftCurtainB, "curtainB");
+
+    for (let index = 0; index < 15; index += 1) {
+      const x = -10 - index * 9.2;
+      const rib = new THREE.Group();
+      rib.position.set(x, 0, this.liminalCenterZ);
+      const mat = new THREE.MeshStandardMaterial({
+        color: index % 2 ? 0x65101c : 0x31060d,
+        roughness: .82,
+        metalness: .02
+      });
+      [-3.18, 3.18].forEach((z) => {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(.22, 6.9, .32), mat);
+        post.position.set(0, 3.45, z);
+        rib.add(post);
+      });
+      const top = new THREE.Mesh(new THREE.BoxGeometry(.24, .2, 6.15), mat);
+      top.position.set(0, 6.88, 0);
+      rib.add(top);
+      level.add(rib);
+      this.liminalGlitchSlices.push({
+        group: rib,
+        baseX: x,
+        phase: this.liminalSeed * .01 + index * 1.77,
+        strength: clamp((-x - 8) / 140, 0, 1)
+      });
+    }
+
+    const segmentLength = 6.8;
+    const segmentCount = 22;
+    for (let index = 0; index < segmentCount; index += 1) {
+      const t = index / (segmentCount - 1);
+      const x = index * segmentLength + segmentLength * .5;
+      const halfWidth = Math.max(.38, 3.2 * (1 - t * .88));
+      const height = Math.max(2.05, 7.05 * (1 - t * .69));
+      const segment = new THREE.Group();
+      segment.position.set(x, 0, this.liminalCenterZ);
+
+      const floorMaterial = this.floorMaterial.clone();
+      const floor = new THREE.Mesh(
+        new THREE.BoxGeometry(segmentLength + .08, .12, halfWidth * 2),
+        floorMaterial
+      );
+      floor.position.y = .015;
+      floor.receiveShadow = true;
+      segment.add(floor);
+
+      const ceiling = new THREE.Mesh(
+        new THREE.BoxGeometry(segmentLength + .08, .12, halfWidth * 2),
+        ceilingMaterial
+      );
+      ceiling.position.y = height;
+      segment.add(ceiling);
+
+      const curtainA = this.createLiminalCurtain(segmentLength + .12, height, this.curtainMaterial, this.liminalSeed + index * 3.1);
+      const curtainB = this.createLiminalCurtain(segmentLength + .12, height, this.curtainDarkMaterial, this.liminalSeed + 200 + index * 4.7);
+      curtainA.position.set(0, height * .5, -halfWidth);
+      curtainB.position.set(0, height * .5, halfWidth);
+      segment.add(curtainA, curtainB);
+
+      level.add(segment);
+      this.liminalRightSegments.push({
+        group: segment,
+        floor,
+        baseY: 0,
+        x,
+        t
+      });
+    }
+
+    const voidMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+    const voidWall = new THREE.Mesh(new THREE.PlaneGeometry(7, 8), voidMaterial);
+    voidWall.rotation.y = -Math.PI / 2;
+    voidWall.position.set(segmentCount * segmentLength + .15, 3.4, this.liminalCenterZ);
+    level.add(voidWall);
+
+    this.liminalBlackFloor = new THREE.Mesh(new THREE.PlaneGeometry(22, 9), voidMaterial);
+    this.liminalBlackFloor.rotation.x = -Math.PI / 2;
+    this.liminalBlackFloor.position.set(segmentCount * segmentLength + 7, -5.5, this.liminalCenterZ);
+    level.add(this.liminalBlackFloor);
+
+    const thresholdLight = new THREE.PointLight(0xb01328, 12, 24, 1.8);
+    thresholdLight.position.set(0, 4.8, this.liminalCenterZ);
+    level.add(thresholdLight);
+    const leftLight = new THREE.PointLight(0x7d0719, 8, 30, 2);
+    leftLight.position.set(-31, 4.3, this.liminalCenterZ - .4);
+    level.add(leftLight);
+    this.liminalLeftLight = leftLight;
+  }
+
+  registerLiminalDistortion(mesh, kind) {
+    const position = mesh.geometry.attributes.position;
+    this.liminalDistortionMeshes.push({
+      mesh,
+      kind,
+      base: new Float32Array(position.array),
+      phase: this.liminalSeed * .013 + this.liminalDistortionMeshes.length * 2.73
+    });
+  }
+
+  openLiminalDoor() {
+    if (!this.liminalPromptActive || this.liminalEntered || this.liminalDoorTarget > .5) return;
+    this.liminalDoorTarget = 1;
+    this.glitch = Math.max(this.glitch, .32);
+    if (this.doorPrompt) {
+      const label = this.doorPrompt.querySelector("span");
+      if (label) label.textContent = "ОТКРЫВАЕТСЯ";
+    }
+  }
+
+  updateDoorPrompt() {
+    if (!this.doorPrompt || !this.liminalDoorPivot) return;
+    const point = new THREE.Vector3(0, 3.15, this.liminalDoorZ - .2);
+    const distance = this.camera.position.distanceTo(point);
+    const active = this.freeCameraEnabled
+      && !this.liminalEntered
+      && this.liminalDoorTarget < .5
+      && distance < 5.3
+      && this.camera.position.z < this.liminalDoorZ + .5;
+    this.liminalPromptActive = active;
+    this.doorPrompt.classList.toggle("is-visible", active);
+    this.doorPrompt.setAttribute("aria-hidden", active ? "false" : "true");
+    if (!active) return;
+
+    const projected = point.clone().project(this.camera);
+    const x = (projected.x * .5 + .5) * window.innerWidth;
+    const y = (-projected.y * .5 + .5) * window.innerHeight;
+    this.doorPrompt.style.left = `${x.toFixed(1)}px`;
+    this.doorPrompt.style.top = `${y.toFixed(1)}px`;
+  }
+
+  updateLiminalWorld(delta) {
+    if (!this.liminalLevel) return;
+
+    this.liminalDoorOpenAmount = damp(
+      this.liminalDoorOpenAmount,
+      this.liminalDoorTarget,
+      this.liminalDoorTarget > this.liminalDoorOpenAmount ? 2.35 : 4,
+      delta
+    );
+    const doorEase = this.liminalDoorOpenAmount * this.liminalDoorOpenAmount * (3 - 2 * this.liminalDoorOpenAmount);
+    if (this.liminalDoorPivot?.visible) {
+      this.liminalDoorPivot.rotation.y = -doorEase * 1.52;
+      this.liminalDoorPivot.position.z = this.liminalDoorZ + Math.sin(doorEase * Math.PI) * .035;
+    }
+    this.updateDoorPrompt();
+
+    if (!this.liminalEntered
+      && this.liminalDoorOpenAmount > .72
+      && this.freeCameraPosition.z > this.liminalDoorZ + .68) {
+      this.liminalEntered = true;
+      this.liminalDoorPivot.visible = false;
+      this.liminalSealCurtain.visible = true;
+      this.liminalPromptActive = false;
+      this.doorPrompt?.classList.remove("is-visible");
+      const label = this.doorPrompt?.querySelector("span");
+      if (label) label.textContent = "ОТКРЫТЬ";
+      this.glitch = Math.max(this.glitch, .46);
+    }
+
+    if (!this.liminalEntered) return;
+
+    const x = this.freeCameraPosition.x;
+    const leftDepth = clamp((-x - 8) / 140, 0, 1);
+    const velocityX = this.freeCameraVelocity.x;
+    const velocityZ = this.freeCameraVelocity.z;
+    const time = this.elapsed;
+    const seed = this.liminalSeed;
+
+    if (x < -7) {
+      const modeA = Math.sin(seed * .017) > 0 ? 1 : -1;
+      const modeB = Math.sin(seed * .041 + 2) > 0 ? 1 : -1;
+      if (this.liminalLeftFloorMaterial?.map) {
+        const map = this.liminalLeftFloorMaterial.map;
+        const autonomous = Math.sin(seed * .003) * .19;
+        map.offset.x += delta * (
+          velocityX * .018 * modeA
+          + autonomous * leftDepth
+          + Math.sin(time * .7 + seed) * .012 * leftDepth
+        );
+        map.offset.y += delta * (
+          velocityZ * .02 * modeB
+          + Math.cos(time * .46 + seed * .3) * .018 * leftDepth
+        );
+      }
+
+      this.liminalDistortionMeshes.forEach((record, meshIndex) => {
+        const attribute = record.mesh.geometry.attributes.position;
+        const array = attribute.array;
+        const base = record.base;
+        const isFloor = record.kind === "floor";
+        for (let i = 0; i < attribute.count; i += 1) {
+          const baseX = base[i * 3];
+          const baseY = base[i * 3 + 1];
+          const baseZ = base[i * 3 + 2];
+          const worldX = record.mesh.position.x + baseX;
+          const depth = clamp((-worldX - 8) / 142, 0, 1);
+          const late = Math.pow(depth, 2.15);
+          const phase = record.phase + meshIndex * 1.31;
+          const pulse = Math.sin(time * (1.05 + depth * 2.8) + baseX * .12 + phase);
+          const coarse = Math.sin(time * .36 + Math.floor(baseX / 4.8) * 2.4 + phase);
+          const jump = Math.sin(time * 5.2 + Math.floor(baseX / 7.4) + seed) > .94 ? 1 : 0;
+
+          if (isFloor) {
+            array[i * 3] = baseX + Math.sin(baseY * .8 + time + phase) * .16 * late;
+            array[i * 3 + 1] = baseY + Math.sin(baseX * .21 - time * .72 + phase) * .45 * late;
+            array[i * 3 + 2] = baseZ
+              + pulse * (.12 + late * 1.18)
+              + coarse * late * .65
+              + jump * late * .38;
+          } else {
+            array[i * 3] = baseX + Math.sin(baseY * .55 + time * .8 + phase) * .22 * late;
+            array[i * 3 + 1] = baseY + Math.sin(baseX * .17 + time * .52 + phase) * .28 * late;
+            array[i * 3 + 2] = baseZ
+              + pulse * (.16 + late * 1.42)
+              + coarse * late * .82
+              + jump * late * .55;
+          }
+        }
+        attribute.needsUpdate = true;
+        if (leftDepth > .35 && Math.floor(time * 4 + meshIndex) % 3 === 0) {
+          record.mesh.geometry.computeVertexNormals();
+        }
+      });
+
+      this.liminalGlitchSlices.forEach((slice, index) => {
+        const local = Math.pow(slice.strength, 1.45) * leftDepth;
+        const lagGate = Math.sin(time * (1.1 + index * .07) + slice.phase);
+        const snap = lagGate > .78 ? 1 : 0;
+        slice.group.position.x = slice.baseX
+          + Math.sin(time * .58 + slice.phase) * local * 1.1
+          + snap * Math.sin(seed + index) * local * 2.4;
+        slice.group.position.z = this.liminalCenterZ
+          + Math.sin(time * 1.7 + slice.phase) * local * .55
+          + (index % 4 === 0 ? Math.sin(time * 4.4 + seed) * local * .45 : 0);
+        slice.group.rotation.x = Math.sin(time * .73 + slice.phase) * local * .075;
+        slice.group.rotation.z = Math.sin(time * 1.24 + slice.phase) * local * .09;
+        const pulseScale = 1 + Math.sin(time * 2.1 + slice.phase) * local * .08;
+        slice.group.scale.set(pulseScale, 1 - local * .04 * Math.sin(time + index), pulseScale);
+      });
+
+      if (this.liminalLeftLight) {
+        const badFlicker = Math.sin(time * 13.7 + seed) > .72 ? .25 : 1;
+        this.liminalLeftLight.intensity = (7.5 + Math.sin(time * 1.8 + seed) * 2.1) * (1 - leftDepth * .45) * badFlicker;
+        this.liminalLeftLight.position.z = this.liminalCenterZ + Math.sin(time * .51 + seed) * leftDepth * 1.4;
+      }
+
+      this.glitch = Math.max(this.glitch, .12 + leftDepth * .92);
+    }
+
+    if (x > 139 && !this.liminalFall) {
+      this.liminalFall = true;
+      this.liminalFallTime = 0;
+      this.freeCameraKeys.clear();
+      this.glitch = 1;
+    }
+
+    if (this.liminalFall) {
+      this.liminalFallTime += delta;
+      const fall = this.liminalFallTime;
+      this.liminalRightSegments.forEach((segment) => {
+        const influence = clamp((segment.x - 125) / 28, 0, 1);
+        if (influence <= 0) return;
+        const delay = (1 - influence) * .55;
+        const t = Math.max(0, fall - delay);
+        segment.group.position.y = segment.baseY - t * t * (2.2 + influence * 5.4);
+        segment.group.rotation.x = Math.sin(segment.x * .13) * t * influence * .09;
+        segment.group.rotation.z = Math.cos(segment.x * .09) * t * influence * .055;
+      });
+      this.camera.position.y = 3.6 - fall * fall * 5.2;
+      this.camera.rotation.z += Math.sin(fall * 4.1) * .003;
+      const blackout = clamp((fall - 1.15) / 1.8, 0, 1);
+      if (this.transitionBlackout) this.transitionBlackout.style.opacity = blackout.toFixed(3);
+      this.glitch = Math.max(this.glitch, .55 + blackout * .45);
+    }
   }
 
   createBoard() {
@@ -1118,6 +1526,11 @@ class PrivateRoom {
 
   bindEvents() {
     this.setupMobileControls();
+    this.doorPrompt?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openLiminalDoor();
+    });
     window.addEventListener("resize", () => this.resize(), { passive: true });
     window.addEventListener("pointermove", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-overlay-ui]")) return;
@@ -1161,6 +1574,11 @@ class PrivateRoom {
 
     window.addEventListener("keydown", (event) => {
       if (!this.freeCameraEnabled) return;
+      if (event.code === "KeyE" && this.liminalPromptActive) {
+        event.preventDefault();
+        this.openLiminalDoor();
+        return;
+      }
       const controls = ["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ShiftRight"];
       if (controls.includes(event.code)) {
         event.preventDefault();
@@ -1431,14 +1849,34 @@ class PrivateRoom {
   }
 
   isWalkBlocked(x, z) {
-    if (x < -10.55 || x > 10.55 || z < -8.95 || z > 67.25) return true;
-    if (z > 17.15 && Math.abs(x) > 2.96) return true;
+    if (this.liminalFall) return false;
+    if (z < -8.95) return true;
+
     const inside = (centerX, centerZ, radiusX, radiusZ) => (
       Math.abs(x - centerX) < radiusX && Math.abs(z - centerZ) < radiusZ
     );
-    if (inside(this.board.position.x, -3.7, 4.15, .72)) return true;
-    if (inside(-5.45, .45, 1.38, 1.48) || inside(5.45, .45, 1.38, 1.48)) return true;
-    if (inside(-7.75, -3.8, .82, .82) || inside(7.75, -3.8, .82, .82)) return true;
+
+    if (z < 67.05) {
+      if (x < -10.55 || x > 10.55) return true;
+      if (z > 17.15 && Math.abs(x) > 2.96) return true;
+      if (inside(this.board.position.x, -3.7, 4.15, .72)) return true;
+      if (inside(-5.45, .45, 1.38, 1.48) || inside(5.45, .45, 1.38, 1.48)) return true;
+      if (inside(-7.75, -3.8, .82, .82) || inside(7.75, -3.8, .82, .82)) return true;
+      return false;
+    }
+
+    if (!this.liminalEntered && this.liminalDoorOpenAmount < .7) return true;
+    if (z < 68.35 && Math.abs(x) > 1.62) return true;
+
+    const centerZ = this.liminalCenterZ || 70.7;
+    if (x < -153.5 || x > 151.2) return true;
+
+    let halfWidth = 3.18;
+    if (x > 0) {
+      const shrink = clamp(x / 149, 0, 1);
+      halfWidth = Math.max(.36, 3.18 * (1 - shrink * .88));
+    }
+    if (Math.abs(z - centerZ) > Math.max(.25, halfWidth - .08)) return true;
     return false;
   }
 
@@ -1641,6 +2079,7 @@ class PrivateRoom {
 
   updateEffects(delta) {
     const theme = this.themeDefinitions[this.activeTheme];
+    this.updateLiminalWorld(delta);
     if (!this.reduceMotion && this.elapsed > this.nextGlitch) {
       this.glitch = this.activeTheme === "fever" ? 1 : random(.42, .78);
       this.nextGlitch = this.elapsed + random(3.3, 7.2);

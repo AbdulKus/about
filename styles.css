@@ -378,3 +378,62 @@ body.is-ready .loader-curtain {
     bottom: max(104px, calc(env(safe-area-inset-bottom) + 96px));
   }
 }
+
+
+.door-prompt {
+  position: fixed;
+  z-index: 32;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 7px 11px 7px 8px;
+  border: 1px solid rgba(238, 226, 205, .38);
+  border-radius: 5px;
+  opacity: 0;
+  color: #f0e5d0;
+  background: rgba(10, 2, 4, .72);
+  box-shadow: 0 7px 24px rgba(0, 0, 0, .48), inset 0 0 18px rgba(122, 21, 37, .12);
+  font: 700 13px/1 "Courier New", monospace;
+  letter-spacing: .08em;
+  pointer-events: none;
+  transform: translate(-50%, -50%) translateY(14px) scale(.96);
+  transition: opacity 150ms ease, transform 180ms ease, border-color 150ms ease;
+  backdrop-filter: blur(4px);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.door-prompt.is-visible {
+  opacity: .94;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) translateY(0) scale(1);
+}
+
+.door-prompt:hover {
+  border-color: rgba(255, 238, 212, .68);
+}
+
+.door-prompt kbd {
+  display: grid;
+  min-width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid rgba(238, 226, 205, .48);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: #fff3dc;
+  background: rgba(104, 20, 32, .54);
+  box-shadow: inset 0 -2px 5px rgba(0, 0, 0, .32);
+  font: 700 14px/1 "Courier New", monospace;
+}
+
+body.is-touch-mode .door-prompt {
+  font-size: 12px;
+}
+
+body.is-touch-mode .door-prompt kbd {
+  min-width: 30px;
+  height: 30px;
+}
