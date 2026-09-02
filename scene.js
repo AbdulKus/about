@@ -5033,6 +5033,8 @@ class PrivateRoom {
   }
 
   resetCityFinaleForJump() {
+    this.cityEmojiPrompt?.remove();
+    this.cityEmojiPrompt = null;
     if (this.cityEmojiSprite) {
       this.cityEmojiSprite.parent?.remove(this.cityEmojiSprite);
       this.cityEmojiSprite.material?.dispose?.();
