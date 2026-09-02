@@ -89,6 +89,8 @@ class PrivateRoom {
       { id: "stairs", label: "Лестница наверх" },
       { id: "white-room", label: "Белая комната" },
       { id: "sky", label: "Небо" },
+      { id: "sky-hills", label: "Поднимающиеся холмы" },
+      { id: "sky-door", label: "Дверь и бабочки" },
       { id: "city", label: "Город" },
       { id: "mutation", label: "Поздняя биомутация" },
       { id: "emoji", label: "Смайл на перекрёстке" },
@@ -101,6 +103,14 @@ class PrivateRoom {
     this.skyTransitionDuration = 3.25;
     this.skyGlare = 0;
     this.skyCloudTime = 0;
+    this.skyWalkTime = 0;
+    this.skyMeadowStarted = false;
+    this.skyMeadowProgress = 0;
+    this.skyMeadowRiseDuration = 20;
+    this.skyMeadowOrigin = new THREE.Vector3();
+    this.skyMeadowDirection = new THREE.Vector3(0, 0, -1);
+    this.skyMeadowTargetY = 0;
+    this.skyMeadowCameraY = 0;
     this.skySpawnPosition = new THREE.Vector3();
     this.audioContext = null;
     this.audioMaster = null;
@@ -1612,6 +1622,382 @@ class PrivateRoom {
     quad.frustumCulled = false;
     this.skyScene.add(quad);
     this.skyCloudQuad = quad;
+    this.createSkyMeadowWorld();
+  }
+
+  skyMeadowHeightLocal(x, z) {
+    const broad = Math.sin(x * .023) * 2.4
+      + Math.cos(z * .019 + .8) * 2.05
+      + Math.sin((x + z) * .034 + 1.7) * 1.25;
+    const crossed = Math.sin(x * .061 - .9) * Math.cos(z * .052 + .4) * .72;
+    const rolling = Math.sin(Math.hypot(x + 34, z - 27) * .031) * 1.05;
+    return broad + crossed + rolling;
+  }
+
+  createSkyMeadowWorld() {
+    this.skyMeadowScene = new THREE.Scene();
+    this.skyMeadowScene.fog = new THREE.Fog(0xc8e2ee, 170, 415);
+    this.skyMeadowRoot = new THREE.Group();
+    this.skyMeadowRoot.visible = false;
+    this.skyMeadowScene.add(this.skyMeadowRoot);
+    this.skyMeadowMaterials = [];
+    this.skyDoorMaterials = [];
+
+    const hemisphere = new THREE.HemisphereLight(0xe8f6ff, 0x30471f, 2.25);
+    this.skyMeadowScene.add(hemisphere);
+    const sun = new THREE.DirectionalLight(0xfff0c5, 3.4);
+    sun.position.set(-68, 110, 46);
+    this.skyMeadowScene.add(sun);
+
+    const textureCanvas = document.createElement("canvas");
+    textureCanvas.width = textureCanvas.height = 512;
+    const textureContext = textureCanvas.getContext("2d");
+    const image = textureContext.createImageData(512, 512);
+    for (let pixel = 0; pixel < 512 * 512; pixel += 1) {
+      const x = pixel % 512;
+      const y = Math.floor(pixel / 512);
+      const grain = Math.sin(x * .19) * 7 + Math.sin(y * .13 + x * .031) * 9 + (Math.random() - .5) * 18;
+      image.data[pixel * 4] = 58 + grain;
+      image.data[pixel * 4 + 1] = 103 + grain * 1.25;
+      image.data[pixel * 4 + 2] = 39 + grain * .48;
+      image.data[pixel * 4 + 3] = 255;
+    }
+    textureContext.putImageData(image, 0, 0);
+    for (let blade = 0; blade < 7800; blade += 1) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const light = Math.random() > .58;
+      textureContext.strokeStyle = light
+        ? `rgba(153,190,89,${random(.035, .13)})`
+        : `rgba(15,53,21,${random(.045, .16)})`;
+      textureContext.lineWidth = random(.3, 1);
+      textureContext.beginPath();
+      textureContext.moveTo(x, y);
+      textureContext.lineTo(x + random(-1.5, 1.5), y - random(2, 7));
+      textureContext.stroke();
+    }
+    const grassTexture = new THREE.CanvasTexture(textureCanvas);
+    grassTexture.colorSpace = THREE.SRGBColorSpace;
+    grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
+    grassTexture.repeat.set(28, 28);
+    grassTexture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    const grassBump = grassTexture.clone();
+    grassBump.colorSpace = THREE.NoColorSpace;
+    grassBump.needsUpdate = true;
+
+    const terrainGeometry = new THREE.PlaneGeometry(520, 520, 128, 128);
+    terrainGeometry.rotateX(-Math.PI / 2);
+    const terrainPositions = terrainGeometry.attributes.position;
+    for (let index = 0; index < terrainPositions.count; index += 1) {
+      const x = terrainPositions.getX(index);
+      const z = terrainPositions.getZ(index);
+      terrainPositions.setY(index, this.skyMeadowHeightLocal(x, z));
+    }
+    terrainGeometry.computeVertexNormals();
+    const terrainMaterial = new THREE.MeshStandardMaterial({
+      color: 0x78a957,
+      map: grassTexture,
+      bumpMap: grassBump,
+      bumpScale: .42,
+      roughness: .96,
+      metalness: 0,
+      transparent: true,
+      opacity: 0
+    });
+    const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+    terrain.receiveShadow = true;
+    this.skyMeadowRoot.add(terrain);
+    this.skyMeadowTerrain = terrain;
+    this.skyMeadowMaterials.push(terrainMaterial);
+
+    const plantRandom = (() => {
+      let seed = 9317;
+      return () => {
+        seed = (seed * 16807) % 2147483647;
+        return (seed - 1) / 2147483646;
+      };
+    })();
+    const dummy = new THREE.Object3D();
+
+    const grassCount = 2600;
+    const bladeGeometry = new THREE.ConeGeometry(.045, .64, 3);
+    const bladeMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4f8f37,
+      roughness: .92,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0
+    });
+    const grass = new THREE.InstancedMesh(bladeGeometry, bladeMaterial, grassCount);
+    for (let index = 0; index < grassCount; index += 1) {
+      const x = (plantRandom() - .5) * 490;
+      const z = (plantRandom() - .5) * 490;
+      const height = .42 + plantRandom() * .72;
+      dummy.position.set(x, this.skyMeadowHeightLocal(x, z) + height * .5, z);
+      dummy.rotation.set((plantRandom() - .5) * .12, plantRandom() * Math.PI, (plantRandom() - .5) * .16);
+      dummy.scale.set(.7 + plantRandom() * .9, height / .64, .7 + plantRandom() * .8);
+      dummy.updateMatrix();
+      grass.setMatrixAt(index, dummy.matrix);
+    }
+    grass.instanceMatrix.needsUpdate = true;
+    grass.frustumCulled = false;
+    this.skyMeadowRoot.add(grass);
+    this.skyMeadowGrass = grass;
+    this.skyMeadowMaterials.push(bladeMaterial);
+
+    const flowerCount = 560;
+    const flowerRecords = [[], [], [], []];
+    const stemGeometry = new THREE.CylinderGeometry(.014, .024, .5, 5);
+    const stemMaterial = new THREE.MeshStandardMaterial({
+      color: 0x39792c,
+      roughness: .9,
+      transparent: true,
+      opacity: 0
+    });
+    const stems = new THREE.InstancedMesh(stemGeometry, stemMaterial, flowerCount);
+    for (let index = 0; index < flowerCount; index += 1) {
+      const x = (plantRandom() - .5) * 470;
+      const z = (plantRandom() - .5) * 470;
+      const stemHeight = .3 + plantRandom() * .52;
+      const ground = this.skyMeadowHeightLocal(x, z);
+      dummy.position.set(x, ground + stemHeight * .5, z);
+      dummy.rotation.set((plantRandom() - .5) * .08, plantRandom() * Math.PI, (plantRandom() - .5) * .08);
+      dummy.scale.set(1, stemHeight / .5, 1);
+      dummy.updateMatrix();
+      stems.setMatrixAt(index, dummy.matrix);
+      flowerRecords[index % flowerRecords.length].push({ x, z, y: ground + stemHeight });
+    }
+    stems.instanceMatrix.needsUpdate = true;
+    stems.frustumCulled = false;
+    this.skyMeadowRoot.add(stems);
+    this.skyMeadowMaterials.push(stemMaterial);
+
+    const flowerColors = [0xffe86a, 0xfff5eb, 0xf38ab5, 0x829cff];
+    const flowerGeometry = new THREE.SphereGeometry(.12, 7, 5);
+    flowerRecords.forEach((records, colorIndex) => {
+      const material = new THREE.MeshStandardMaterial({
+        color: flowerColors[colorIndex],
+        emissive: flowerColors[colorIndex],
+        emissiveIntensity: .12,
+        roughness: .7,
+        transparent: true,
+        opacity: 0
+      });
+      const heads = new THREE.InstancedMesh(flowerGeometry, material, records.length);
+      records.forEach((record, index) => {
+        dummy.position.set(record.x, record.y, record.z);
+        dummy.rotation.set(plantRandom() * .4, plantRandom() * Math.PI, plantRandom() * .4);
+        const size = .72 + plantRandom() * .75;
+        dummy.scale.set(size, size * .48, size);
+        dummy.updateMatrix();
+        heads.setMatrixAt(index, dummy.matrix);
+      });
+      heads.instanceMatrix.needsUpdate = true;
+      heads.frustumCulled = false;
+      this.skyMeadowRoot.add(heads);
+      this.skyMeadowMaterials.push(material);
+    });
+
+    const door = new THREE.Group();
+    this.skyMeadowRoot.add(door);
+    this.skyDoorRoot = door;
+    const doorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2f5147,
+      roughness: .71,
+      metalness: .03,
+      transparent: true,
+      opacity: 0
+    });
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0xddd2b4,
+      roughness: .82,
+      metalness: .03,
+      transparent: true,
+      opacity: 0
+    });
+    const thresholdMaterial = new THREE.MeshBasicMaterial({
+      color: 0xfff4c7,
+      toneMapped: false,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide
+    });
+    this.skyDoorMaterials.push(doorMaterial, frameMaterial, thresholdMaterial);
+
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(3.65, 6.75, .38, 8, 14, 2), doorMaterial);
+    slab.position.y = 3.48;
+    door.add(slab);
+    [-2.05, 2.05].forEach((x) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.48, 7.5, .68), frameMaterial);
+      post.position.set(x, 3.75, 0);
+      door.add(post);
+    });
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.58, .58, .76), frameMaterial);
+    lintel.position.y = 7.35;
+    door.add(lintel);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(5.1, .28, 1.7), frameMaterial);
+    step.position.set(0, .08, .18);
+    door.add(step);
+    const portalGlow = new THREE.Mesh(new THREE.PlaneGeometry(3.36, 6.48), thresholdMaterial);
+    portalGlow.position.set(0, 3.5, -.205);
+    door.add(portalGlow);
+    const knobMaterial = new THREE.MeshStandardMaterial({
+      color: 0xc7a85d,
+      emissive: 0x49330d,
+      emissiveIntensity: .4,
+      roughness: .28,
+      metalness: .78,
+      transparent: true,
+      opacity: 0
+    });
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(.11, 12, 8), knobMaterial);
+    knob.position.set(1.3, 3.35, .27);
+    door.add(knob);
+    this.skyDoorMaterials.push(knobMaterial);
+    this.skyDoorLight = new THREE.PointLight(0xffe4a3, 0, 28, 1.7);
+    this.skyDoorLight.position.set(0, 3.8, -1.2);
+    door.add(this.skyDoorLight);
+
+    const cloudCanvas = document.createElement("canvas");
+    cloudCanvas.width = cloudCanvas.height = 256;
+    const cloudContext = cloudCanvas.getContext("2d");
+    const cloudGradient = cloudContext.createRadialGradient(128, 128, 12, 128, 128, 124);
+    cloudGradient.addColorStop(0, "rgba(255,255,255,.92)");
+    cloudGradient.addColorStop(.35, "rgba(248,252,255,.78)");
+    cloudGradient.addColorStop(.73, "rgba(230,244,252,.34)");
+    cloudGradient.addColorStop(1, "rgba(220,240,250,0)");
+    cloudContext.fillStyle = cloudGradient;
+    cloudContext.fillRect(0, 0, 256, 256);
+    const meadowCloudTexture = new THREE.CanvasTexture(cloudCanvas);
+    const meadowCloudMaterial = new THREE.SpriteMaterial({
+      map: meadowCloudTexture,
+      color: 0xffffff,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0
+    });
+    this.skyMeadowClouds = [];
+    for (let index = 0; index < 22; index += 1) {
+      const sprite = new THREE.Sprite(meadowCloudMaterial);
+      const x = (plantRandom() - .5) * 360;
+      const z = (plantRandom() - .5) * 360;
+      sprite.position.set(x, this.skyMeadowHeightLocal(x, z) + 8 + plantRandom() * 18, z);
+      const scale = 18 + plantRandom() * 32;
+      sprite.scale.set(scale * (1.25 + plantRandom()), scale, 1);
+      sprite.userData.phase = plantRandom() * Math.PI * 2;
+      this.skyMeadowRoot.add(sprite);
+      this.skyMeadowClouds.push(sprite);
+    }
+    this.skyMeadowMaterials.push(meadowCloudMaterial);
+
+    const butterflyColors = [0xffcb42, 0x69b9ff, 0xf076b4, 0xf6f1dc, 0x8e71e8];
+    const rightWingGeometry = new THREE.PlaneGeometry(.42, .3);
+    rightWingGeometry.translate(.21, 0, 0);
+    const leftWingGeometry = new THREE.PlaneGeometry(.42, .3);
+    leftWingGeometry.translate(-.21, 0, 0);
+    this.skyButterflyMaterials = butterflyColors.map((color) => new THREE.MeshBasicMaterial({
+      color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0,
+      toneMapped: false
+    }));
+    this.skyButterflies = [];
+    for (let index = 0; index < 30; index += 1) {
+      const group = new THREE.Group();
+      const material = this.skyButterflyMaterials[index % this.skyButterflyMaterials.length];
+      const leftWing = new THREE.Mesh(leftWingGeometry, material);
+      const rightWing = new THREE.Mesh(rightWingGeometry, material);
+      leftWing.rotation.z = .18;
+      rightWing.rotation.z = -.18;
+      group.add(leftWing, rightWing);
+      door.parent.add(group);
+      this.skyButterflies.push({
+        group,
+        leftWing,
+        rightWing,
+        phase: plantRandom() * Math.PI * 2,
+        radius: 2.8 + plantRandom() * 8,
+        height: 1.4 + plantRandom() * 6.8,
+        speed: .22 + plantRandom() * .42
+      });
+    }
+    this.skyDoorMaterials.push(...this.skyButterflyMaterials);
+  }
+
+  startSkyMeadowTransition() {
+    if (this.skyMeadowStarted || !this.skyMeadowRoot) return;
+    this.skyMeadowStarted = true;
+    this.skyMeadowProgress = 0;
+    this.skyMeadowOrigin.copy(this.freeCameraPosition);
+    const look = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
+    if (look.lengthSq() < .1) look.set(0, 0, -1);
+    this.skyMeadowDirection.copy(look.normalize());
+    this.skyMeadowTargetY = this.skyBaseY - this.freeEyeHeight - this.skyMeadowHeightLocal(0, 0);
+    this.skyMeadowRoot.position.set(
+      this.skyMeadowOrigin.x,
+      this.skyMeadowTargetY - 46,
+      this.skyMeadowOrigin.z
+    );
+    const doorX = this.skyMeadowDirection.x * 138;
+    const doorZ = this.skyMeadowDirection.z * 138;
+    const doorY = this.skyMeadowHeightLocal(doorX, doorZ);
+    this.skyDoorRoot.position.set(doorX, doorY, doorZ);
+    this.skyDoorRoot.rotation.y = Math.atan2(this.skyMeadowDirection.x, this.skyMeadowDirection.z);
+    this.skyMeadowRoot.visible = true;
+    this.skyMeadowCameraY = this.skyBaseY;
+  }
+
+  updateSkyMeadow(delta) {
+    if (!this.skyMeadowStarted || !this.skyMeadowRoot) return this.skyBaseY;
+    this.skyMeadowProgress = clamp(
+      this.skyMeadowProgress + delta / this.skyMeadowRiseDuration,
+      0,
+      1
+    );
+    const progress = this.skyMeadowProgress;
+    const rise = progress * progress * (3 - 2 * progress);
+    this.skyMeadowRoot.position.y = lerp(this.skyMeadowTargetY - 46, this.skyMeadowTargetY, rise);
+    const meadowOpacity = clamp(progress / .24, 0, 1);
+    this.skyMeadowMaterials.forEach((material) => {
+      material.opacity = meadowOpacity;
+    });
+
+    const doorReveal = clamp((progress - .66) / .28, 0, 1);
+    this.skyDoorMaterials.forEach((material) => {
+      material.opacity = doorReveal;
+    });
+    if (this.skyDoorLight) this.skyDoorLight.intensity = doorReveal * (2.2 + Math.sin(this.elapsed * 1.8) * .35);
+
+    const doorPosition = this.skyDoorRoot.position;
+    this.skyButterflies?.forEach((record, index) => {
+      const angle = this.elapsed * record.speed + record.phase;
+      record.group.position.set(
+        doorPosition.x + Math.cos(angle) * record.radius,
+        doorPosition.y + record.height + Math.sin(angle * 2.1 + index) * .72,
+        doorPosition.z + Math.sin(angle) * record.radius * .62
+      );
+      record.group.rotation.y = -angle + Math.PI * .5;
+      const flap = Math.sin(this.elapsed * (10.5 + index % 5) + record.phase) * 1.05;
+      record.leftWing.rotation.y = flap;
+      record.rightWing.rotation.y = -flap;
+      record.group.scale.setScalar(.68 + Math.sin(angle * 1.7) * .12);
+    });
+    this.skyMeadowClouds?.forEach((cloud, index) => {
+      cloud.position.x += Math.sin(this.elapsed * .08 + cloud.userData.phase) * delta * .12;
+      cloud.position.y += Math.sin(this.elapsed * .19 + cloud.userData.phase + index) * delta * .055;
+    });
+
+    const localX = this.freeCameraPosition.x - this.skyMeadowRoot.position.x;
+    const localZ = this.freeCameraPosition.z - this.skyMeadowRoot.position.z;
+    const surfaceEye = this.skyMeadowRoot.position.y
+      + this.skyMeadowHeightLocal(localX, localZ)
+      + this.freeEyeHeight;
+    const surfaceBlendRaw = clamp((progress - .82) / .18, 0, 1);
+    const surfaceBlend = surfaceBlendRaw * surfaceBlendRaw * (3 - 2 * surfaceBlendRaw);
+    const targetEye = lerp(this.skyBaseY, surfaceEye, surfaceBlend);
+    this.skyMeadowCameraY = damp(this.skyMeadowCameraY, targetEye, progress >= .999 ? 6.2 : 3.6, delta);
+    return this.skyMeadowCameraY;
   }
 
   updateCloudWorld(delta) {
@@ -1651,6 +2037,16 @@ class PrivateRoom {
     if (this.skyMode) return;
     this.skyMode = true;
     this.skyTransition = 0;
+    this.skyWalkTime = 0;
+    this.skyMeadowStarted = false;
+    this.skyMeadowProgress = 0;
+    if (this.skyMeadowRoot) this.skyMeadowRoot.visible = false;
+    this.skyMeadowMaterials?.forEach((material) => {
+      material.opacity = 0;
+    });
+    this.skyDoorMaterials?.forEach((material) => {
+      material.opacity = 0;
+    });
     this.scene.visible = false;
     this.renderer.shadowMap.enabled = false;
     this.glitch = 0;
@@ -1669,12 +2065,19 @@ class PrivateRoom {
     // The scene swap happens behind a fully white frame. Camera coordinates,
     // orientation, held controls and velocity remain untouched.
     this.skyBaseY = this.camera.position.y;
+    this.skyMeadowCameraY = this.skyBaseY;
     this.skySpawnPosition.copy(this.camera.position);
     this.skyCloudMaterial.uniforms.uSpawnPos.value.copy(this.skySpawnPosition);
     this.camera.near = .1;
     this.camera.far = 420;
     this.camera.updateProjectionMatrix();
     this.resize();
+    if (!this.skyMeadowCompiled && this.skyMeadowRoot) {
+      this.skyMeadowRoot.visible = true;
+      this.renderer.compile(this.skyMeadowScene, this.camera);
+      this.skyMeadowRoot.visible = false;
+      this.skyMeadowCompiled = true;
+    }
     this.updateCloudWorld(0);
   }
 
@@ -1702,16 +2105,41 @@ class PrivateRoom {
     const desired = input.lengthSq() > 0 ? input.normalize().multiplyScalar(speed * inputStrength) : input;
     this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 5.6, delta);
     this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 5.6, delta);
+
+    const previousX = this.freeCameraPosition.x;
+    const previousZ = this.freeCameraPosition.z;
     this.freeCameraPosition.x += this.freeCameraVelocity.x * delta;
     this.freeCameraPosition.z += this.freeCameraVelocity.z * delta;
-
-    this.camera.position.set(
-      this.freeCameraPosition.x,
-      this.skyBaseY + Math.sin(this.skyCloudTime * .29) * .045,
-      this.freeCameraPosition.z
+    const actualMovement = Math.hypot(
+      this.freeCameraPosition.x - previousX,
+      this.freeCameraPosition.z - previousZ
     );
+    const skyAdapted = this.skyTransition >= this.skyWhiteHold + this.skyTransitionDuration * .92;
+    if (skyAdapted && inputStrength > .04 && actualMovement > .001) {
+      this.skyWalkTime += delta;
+    }
+    if (!this.skyMeadowStarted && this.skyWalkTime >= 10) {
+      this.startSkyMeadowTransition();
+    }
+
+    const movementRatio = clamp(Math.hypot(this.freeCameraVelocity.x, this.freeCameraVelocity.z) / speed, 0, 1);
+    this.walkAmount = damp(this.walkAmount, movementRatio, movementRatio > this.walkAmount ? 8 : 5.5, delta);
+    if (actualMovement > .002) this.walkPhase += delta * (running ? 12.4 : 8.9);
+
+    const meadowEyeY = this.updateSkyMeadow(delta);
+    const groundBlend = this.skyMeadowStarted
+      ? clamp((this.skyMeadowProgress - .88) / .12, 0, 1)
+      : 0;
+    const bobY = Math.sin(this.walkPhase * 2) * .05 * this.walkAmount * groundBlend;
+    const sway = Math.sin(this.walkPhase) * .022 * this.walkAmount * groundBlend;
+    this.camera.position.set(
+      this.freeCameraPosition.x + right.x * sway,
+      meadowEyeY + bobY + Math.sin(this.skyCloudTime * .29) * .025 * (1 - groundBlend),
+      this.freeCameraPosition.z + right.z * sway
+    );
+    this.freeCameraPosition.y = meadowEyeY;
     this.camera.rotation.order = "YXZ";
-    this.camera.rotation.set(this.freePitch, this.freeYaw, 0);
+    this.camera.rotation.set(this.freePitch, this.freeYaw, Math.sin(this.walkPhase) * .005 * this.walkAmount * groundBlend);
   }
 
   registerLiminalDistortion(mesh, kind) {
@@ -3040,47 +3468,105 @@ class PrivateRoom {
       const from = chunk.userData.bioBuildings[fromIndex];
       const to = chunk.userData.bioBuildings[toIndex];
       if (!from || !to) return;
-      const arteryHeight = 9 + seeded(780 + arteryIndex) * 10;
+
+      const center = new THREE.Vector3(0, 0, 0);
+      const fromPosition = new THREE.Vector3(from.mesh.position.x, 0, from.mesh.position.z);
+      const toPosition = new THREE.Vector3(to.mesh.position.x, 0, to.mesh.position.z);
+      const fromInset = center.clone().sub(fromPosition).normalize()
+        .multiplyScalar(Math.min(from.width, from.depth) * .46);
+      const toInset = center.clone().sub(toPosition).normalize()
+        .multiplyScalar(Math.min(to.width, to.depth) * .46);
+      const arteryStart = fromPosition.clone().add(fromInset);
+      const arteryEnd = toPosition.clone().add(toInset);
+      arteryStart.y = .2;
+      arteryEnd.y = .2;
+      const arteryLift = 1.15 + seeded(780 + arteryIndex) * 1.25;
       const arteryCurve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(from.mesh.position.x, arteryHeight - 1.5, from.mesh.position.z),
+        arteryStart,
         new THREE.Vector3(
-          lerp(from.mesh.position.x, to.mesh.position.x, .3),
-          arteryHeight + 2.8 + seeded(781 + arteryIndex) * 3,
-          lerp(from.mesh.position.z, to.mesh.position.z, .3)
+          lerp(arteryStart.x, arteryEnd.x, .22),
+          .42 + arteryLift * .32,
+          lerp(arteryStart.z, arteryEnd.z, .22) + (arteryIndex ? -1.8 : 1.8)
         ),
         new THREE.Vector3(
-          lerp(from.mesh.position.x, to.mesh.position.x, .68),
-          arteryHeight + 1.4 + seeded(783 + arteryIndex) * 4,
-          lerp(from.mesh.position.z, to.mesh.position.z, .68)
+          lerp(arteryStart.x, arteryEnd.x, .5),
+          arteryLift,
+          lerp(arteryStart.z, arteryEnd.z, .5)
         ),
-        new THREE.Vector3(to.mesh.position.x, arteryHeight, to.mesh.position.z)
+        new THREE.Vector3(
+          lerp(arteryStart.x, arteryEnd.x, .78),
+          .38 + arteryLift * .28,
+          lerp(arteryStart.z, arteryEnd.z, .78) + (arteryIndex ? 1.5 : -1.5)
+        ),
+        arteryEnd
       ]);
+      const arteryRadius = .24 + seeded(785 + arteryIndex) * .16;
       const artery = new THREE.Mesh(
-        new THREE.TubeGeometry(arteryCurve, 34, .2 + seeded(785 + arteryIndex) * .18, 8, false),
+        new THREE.TubeGeometry(arteryCurve, 42, arteryRadius, 9, false),
         this.cityFleshMaterial
       );
-      registerBioMesh(artery, .72 + seeded(786 + arteryIndex) * .13, .052);
+      registerBioMesh(artery, .72 + seeded(786 + arteryIndex) * .11, .045);
 
-      const hangingPositions = [];
-      const arteryPoints = arteryCurve.getPoints(8);
-      arteryPoints.slice(1, -1).forEach((point, filamentIndex) => {
-        const length = 1.2 + seeded(800 + arteryIndex * 10 + filamentIndex) * 5.4;
-        hangingPositions.push(
-          point.x, point.y, point.z,
-          point.x + (seeded(820 + filamentIndex) - .5) * .7,
-          Math.max(2.5, point.y - length),
-          point.z + (seeded(830 + filamentIndex) - .5) * .7
+      [arteryStart, arteryEnd].forEach((point, anchorIndex) => {
+        const anchor = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 10, 7),
+          this.cityFleshMaterial
         );
+        anchor.position.copy(point);
+        anchor.position.y = .13;
+        anchor.scale.set(
+          arteryRadius * (2.6 + seeded(790 + anchorIndex) * .8),
+          arteryRadius * 1.25,
+          arteryRadius * (2.7 + seeded(794 + anchorIndex) * .7)
+        );
+        registerBioMesh(anchor, .69 + seeded(798 + anchorIndex) * .09, .032);
       });
-      const hangingGeometry = new THREE.BufferGeometry();
-      hangingGeometry.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(hangingPositions, 3)
-      );
-      const hangingTissue = new THREE.LineSegments(hangingGeometry, this.cityCapillaryMaterial);
-      registerBioMesh(hangingTissue, .78 + seeded(840 + arteryIndex) * .1, .018);
-    });
 
+      const filamentPositions = [];
+      const arteryPoints = arteryCurve.getPoints(14);
+      arteryPoints.slice(1, -1).forEach((point, filamentIndex) => {
+        const sideSign = filamentIndex % 2 ? 1 : -1;
+        const direction = arteryPoints[Math.min(arteryPoints.length - 1, filamentIndex + 2)]
+          .clone().sub(point).setY(0).normalize();
+        const lateral = new THREE.Vector3(-direction.z, 0, direction.x);
+        if (filamentIndex % 3 === 0) {
+          const attachedIndex = Math.min(arteryPoints.length - 2, filamentIndex + 4);
+          const attached = arteryPoints[attachedIndex].clone();
+          const sag = point.clone().lerp(attached, .5);
+          sag.addScaledVector(lateral, sideSign * (1.1 + seeded(810 + filamentIndex) * 1.5));
+          sag.y = Math.max(.08, Math.min(point.y, attached.y) - (.28 + seeded(820 + filamentIndex) * .48));
+          filamentPositions.push(
+            point.x, point.y, point.z,
+            sag.x, sag.y, sag.z,
+            sag.x, sag.y, sag.z,
+            attached.x, attached.y, attached.z
+          );
+        } else {
+          const reach = 2.8 + seeded(830 + filamentIndex) * 5.6;
+          const endPoint = point.clone()
+            .addScaledVector(lateral, sideSign * reach)
+            .addScaledVector(direction, (seeded(840 + filamentIndex) - .5) * 3.2);
+          endPoint.y = .065;
+          const middle = point.clone().lerp(endPoint, .48);
+          middle.y = Math.max(.07, point.y * .34);
+          middle.x += (seeded(850 + filamentIndex) - .5) * 1.1;
+          middle.z += (seeded(860 + filamentIndex) - .5) * 1.1;
+          filamentPositions.push(
+            point.x, point.y, point.z,
+            middle.x, middle.y, middle.z,
+            middle.x, middle.y, middle.z,
+            endPoint.x, endPoint.y, endPoint.z
+          );
+        }
+      });
+      const filamentGeometry = new THREE.BufferGeometry();
+      filamentGeometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(filamentPositions, 3)
+      );
+      const filaments = new THREE.LineSegments(filamentGeometry, this.cityCapillaryMaterial);
+      registerBioMesh(filaments, .76 + seeded(870 + arteryIndex) * .08, .014);
+    });
 
 
     const drainMaterial = new THREE.MeshStandardMaterial({ color: 0x090c0f, roughness: .54, metalness: .76 });
@@ -3686,9 +4172,10 @@ class PrivateRoom {
     this.cityEmojiPrompt.classList.toggle("is-visible", active);
     this.cityEmojiPrompt.setAttribute("aria-hidden", active ? "false" : "true");
     if (!active) return;
-    const projected = this.cityEmojiSprite.position.clone().add(new THREE.Vector3(0, 2.7, 0)).project(this.camera);
-    this.cityEmojiPrompt.style.left = `${((projected.x * .5 + .5) * window.innerWidth).toFixed(1)}px`;
-    this.cityEmojiPrompt.style.top = `${((-projected.y * .5 + .5) * window.innerHeight).toFixed(1)}px`;
+    // Keep the interaction prompt in the player's field of view, like the
+    // corridor door prompt, instead of pinning it above the emoji's head.
+    this.cityEmojiPrompt.style.left = "50%";
+    this.cityEmojiPrompt.style.top = "68%";
   }
 
   playCityStrike() {
@@ -4940,7 +5427,10 @@ class PrivateRoom {
       .06
     );
 
-    const movingOnGround = this.freeCameraEnabled && !this.skyMode && (!this.cityMode || this.cityLanded) && this.walkAmount > .17;
+    const skyOnGround = this.skyMode && this.skyMeadowStarted && this.skyMeadowProgress > .9;
+    const movingOnGround = this.freeCameraEnabled
+      && ((!this.skyMode && (!this.cityMode || this.cityLanded)) || skyOnGround)
+      && this.walkAmount > .17;
     const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
     const footstepIndex = Math.floor(this.walkPhase / (Math.PI * 1.22));
     if (movingOnGround && footstepIndex !== this.lastFootstepIndex) {
@@ -5242,11 +5732,31 @@ class PrivateRoom {
       this.jumpToLiminalStage(this.liminalStairEndX - 1.2, this.liminalCenterZ, Math.PI / 2, true);
       return;
     }
-    if (stageId === "sky") {
+    if (stageId === "sky" || stageId === "sky-hills" || stageId === "sky-door") {
       this.jumpToLiminalStage(this.liminalStairExitX - .2, this.liminalCenterZ, Math.PI / 2, true);
       this.enterCloudWorld();
       this.skyTransition = this.skyWhiteHold + this.skyTransitionDuration;
       if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
+      if (stageId !== "sky") {
+        this.skyWalkTime = 10;
+        this.startSkyMeadowTransition();
+        this.skyMeadowProgress = stageId === "sky-hills" ? .48 : 1;
+        if (stageId === "sky-door") {
+          this.freeCameraPosition.x += this.skyMeadowDirection.x * 92;
+          this.freeCameraPosition.z += this.skyMeadowDirection.z * 92;
+        }
+        this.updateSkyMeadow(0);
+        if (stageId === "sky-door") {
+          const localX = this.freeCameraPosition.x - this.skyMeadowRoot.position.x;
+          const localZ = this.freeCameraPosition.z - this.skyMeadowRoot.position.z;
+          const surfaceEye = this.skyMeadowRoot.position.y
+            + this.skyMeadowHeightLocal(localX, localZ)
+            + this.freeEyeHeight;
+          this.skyMeadowCameraY = surfaceEye;
+          this.freeCameraPosition.y = surfaceEye;
+          this.camera.position.set(this.freeCameraPosition.x, surfaceEye, this.freeCameraPosition.z);
+        }
+      }
       return;
     }
     this.jumpToCityStage(stageId);
@@ -6010,6 +6520,10 @@ class PrivateRoom {
       this.renderer.setRenderTarget(null);
       this.renderer.clear();
       this.renderer.render(this.skyScene, this.skyRenderCamera);
+      if (this.skyMeadowRoot?.visible) {
+        this.renderer.clearDepth();
+        this.renderer.render(this.skyMeadowScene, this.camera);
+      }
       return;
     }
     this.renderer.setRenderTarget(this.renderTarget);
