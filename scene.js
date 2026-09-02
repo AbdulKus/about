@@ -1221,7 +1221,7 @@ class PrivateRoom {
       return rail;
     };
 
-    [-1.46, 1.46].forEach((side) => {
+    [-1.33, 1.33].forEach((side) => {
       const railStart = new THREE.Vector3(startX + .12, 1.03, centerZ + side);
       const railEnd = new THREE.Vector3(endX - .08, this.liminalStairRise + 1.03, centerZ + side);
       makeRail(railStart, railEnd, .048);
@@ -1343,7 +1343,8 @@ class PrivateRoom {
       side: THREE.DoubleSide,
       toneMapped: false,
       depthTest: true,
-      depthWrite: true
+      depthWrite: true,
+      fog: false
     });
     const whitePortal = new THREE.Mesh(
       new THREE.PlaneGeometry(hatchHalfWidth * 2.02, 7.8),
@@ -1355,6 +1356,42 @@ class PrivateRoom {
     whitePortal.renderOrder = 8;
     exit.add(whitePortal);
     this.liminalWhitePortal = whitePortal;
+
+    const haloCanvas = document.createElement("canvas");
+    haloCanvas.width = haloCanvas.height = 256;
+    const haloContext = haloCanvas.getContext("2d");
+    const haloGradient = haloContext.createRadialGradient(128, 128, 52, 128, 128, 128);
+    haloGradient.addColorStop(0, "rgba(255,255,255,.72)");
+    haloGradient.addColorStop(.62, "rgba(255,255,255,.24)");
+    haloGradient.addColorStop(1, "rgba(255,255,255,0)");
+    haloContext.fillStyle = haloGradient;
+    haloContext.fillRect(0, 0, 256, 256);
+    const haloTexture = new THREE.CanvasTexture(haloCanvas);
+    const portalHalo = new THREE.Mesh(
+      new THREE.PlaneGeometry(hatchHalfWidth * 2.55, 9.4),
+      new THREE.MeshBasicMaterial({
+        map: haloTexture,
+        color: 0xffffff,
+        transparent: true,
+        opacity: .48,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+        fog: false
+      })
+    );
+    portalHalo.rotation.y = Math.PI / 2;
+    portalHalo.position.set(endX - .195, floorY + 3.72, centerZ);
+    portalHalo.renderOrder = 7;
+    exit.add(portalHalo);
+    this.liminalWhitePortalHalo = portalHalo;
+
+    const portalFloorLight = new THREE.SpotLight(0xffffff, 34, 15, Math.PI * .19, .92, 1.8);
+    portalFloorLight.position.set(endX - .08, floorY + 3.1, centerZ);
+    portalFloorLight.target.position.set(endX + 7.2, floorY - 2.35, centerZ);
+    portalFloorLight.castShadow = false;
+    exit.add(portalFloorLight, portalFloorLight.target);
 
     const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
     warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
@@ -2162,6 +2199,12 @@ class PrivateRoom {
     this.camera.position.set(0, 34, 14);
     this.freeCameraPosition.set(0, 3.6, 14);
     this.freeCameraVelocity.set(0, 0, 0);
+    this.glitch = 0;
+    this.postMaterial.uniforms.glitch.value = 0;
+    document.documentElement.style.setProperty("--glitch-opacity", "0");
+    document.documentElement.style.setProperty("--glitch-x", "0px");
+    const roomScreenEffects = document.querySelector(".screen-effects");
+    if (roomScreenEffects) roomScreenEffects.style.display = "none";
     if (this.transitionBlackout) {
       this.transitionBlackout.style.background = "#000";
       this.transitionBlackout.style.opacity = "1";
@@ -3205,8 +3248,10 @@ class PrivateRoom {
         && stairHeight >= this.liminalStairRise * .985;
       this.liminalWhiteRoom.visible = physicallyInsideRoom;
       if (this.liminalWhitePortal) {
-        this.liminalWhitePortal.visible = !this.skyMode
+        const portalVisible = !this.skyMode
           && this.freeCameraPosition.x > this.liminalStairEndX - .62;
+        this.liminalWhitePortal.visible = portalVisible;
+        if (this.liminalWhitePortalHalo) this.liminalWhitePortalHalo.visible = portalVisible;
       }
     }
 
@@ -3223,8 +3268,14 @@ class PrivateRoom {
         1
       );
       const roomEase = roomProgress * roomProgress * (3 - 2 * roomProgress);
-      const roomGlare = roomProgress > 0 ? lerp(.58, .94, roomEase) : 0;
-      this.skyGlare = Math.max(stairGlare, roomGlare);
+      const portalCross = clamp(
+        (this.liminalStairEndX + .08 - this.freeCameraPosition.x) / .72,
+        0,
+        1
+      );
+      const portalWhiteout = portalCross * portalCross * (3 - 2 * portalCross);
+      const roomGlare = roomProgress > 0 ? lerp(.42, 1, Math.max(roomEase, portalWhiteout)) : 0;
+      this.skyGlare = portalCross > .94 ? 1 : Math.max(stairGlare, roomGlare);
       if (this.transitionBlackout) {
         this.transitionBlackout.style.background = this.skyGlare > 0 ? "#fff" : "#000";
         this.transitionBlackout.style.opacity = this.skyGlare.toFixed(3);
