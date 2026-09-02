@@ -762,13 +762,6 @@ class PrivateRoom {
 
     const doorwayWidth = 3.55;
     const doorwayHeight = 6.3;
-    const sideWidth = (width - doorwayWidth) * .5;
-    [-1, 1].forEach((side) => {
-      const sideWall = new THREE.Mesh(new THREE.BoxGeometry(sideWidth, height, .3), wallMaterial);
-      sideWall.position.set(side * (doorwayWidth * .5 + sideWidth * .5), height * .5, endZ);
-      sideWall.receiveShadow = true;
-      passage.add(sideWall);
-    });
     const endHeader = new THREE.Mesh(
       new THREE.BoxGeometry(doorwayWidth, height - doorwayHeight, .3),
       wallMaterial
@@ -992,7 +985,7 @@ class PrivateRoom {
       const t = clamp((index - 3) / (segmentCount - 4), 0, 1);
       const x = index * segmentLength + segmentLength * .5;
       const halfWidth = Math.max(.38, 3.2 * (1 - t * .88));
-      const height = Math.max(2.05, 7.05 * (1 - t * .69));
+      const height = passageHeight;
       const segment = new THREE.Group();
       segment.position.set(x, 0, this.liminalCenterZ);
 
