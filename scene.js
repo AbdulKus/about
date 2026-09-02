@@ -57,6 +57,10 @@ class PrivateRoom {
     this.skyBaseY = 0;
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
+    this.cityMode = false;
+    this.cityLanded = false;
+    this.cityLandingTime = 0;
+    this.cityImpactPlayed = false;
     this.skyTransition = 0;
     this.skyWhiteHold = .85;
     this.skyTransitionDuration = 3.25;
@@ -148,6 +152,7 @@ class PrivateRoom {
     this.createRoom();
     this.createBackPassage();
     this.createCloudWorld();
+    this.createEndlessCity();
     this.createBoard();
     this.createChairs();
     this.createLamps();
@@ -1838,31 +1843,256 @@ class PrivateRoom {
       this.glitch *= 1 - this.liminalStairSanctuary * .94;
     }
 
-    if (x > 131.65 && !this.liminalFall) {
+    // The fracture starts well before the last lamp, so the player sees the
+    // floor unzip and crumble ahead before gravity takes over.
+    if (x > 118.4 && !this.liminalFall) {
       this.liminalFall = true;
       this.liminalFallTime = 0;
-      this.freeCameraKeys.clear();
+      this.liminalFallAirborne = false;
       this.glitch = 1;
+      this.liminalRightSegments.forEach((segment, segmentIndex) => {
+        if (segment.x < 109) return;
+        segment.floor.visible = false;
+        segment.fragments = [];
+        const columns = 5;
+        const rows = 3;
+        for (let column = 0; column < columns; column += 1) {
+          for (let row = 0; row < rows; row += 1) {
+            const shard = new THREE.Mesh(
+              new THREE.BoxGeometry(1.28, .12, 1.42),
+              this.floorMaterial
+            );
+            shard.position.set(
+              -3.4 + (column + .5) * 1.36,
+              .02,
+              -2.13 + (row + .5) * 1.42
+            );
+            shard.rotation.y = Math.sin((segmentIndex + 1) * 12.7 + row * 4.1 + column) * .035;
+            shard.userData.baseY = shard.position.y;
+            shard.userData.delay = Math.max(0, (segment.x - 109) * .018 + column * .055 + row * .028);
+            shard.userData.spin = Math.sin(segment.x * 2.7 + column * 7.1 + row * 3.2);
+            shard.receiveShadow = true;
+            segment.group.add(shard);
+            segment.fragments.push(shard);
+          }
+        }
+      });
     }
 
     if (this.liminalFall) {
       this.liminalFallTime += delta;
       const fall = this.liminalFallTime;
       this.liminalRightSegments.forEach((segment) => {
-        const influence = clamp((segment.x - 121.5) / 17.5, 0, 1);
-        if (influence <= 0) return;
-        const delay = (1 - influence) * .55;
-        const t = Math.max(0, fall - delay);
-        segment.group.position.y = segment.baseY - t * t * (2.2 + influence * 5.4);
-        segment.group.rotation.x = Math.sin(segment.x * .13) * t * influence * .09;
-        segment.group.rotation.z = Math.cos(segment.x * .09) * t * influence * .055;
+        segment.fragments?.forEach((shard) => {
+          const t = Math.max(0, fall - shard.userData.delay);
+          if (t <= 0) return;
+          shard.position.y = shard.userData.baseY - t * t * (1.55 + Math.abs(shard.userData.spin) * 2.5);
+          shard.rotation.x += delta * shard.userData.spin * 1.7;
+          shard.rotation.z += delta * (1.1 + Math.abs(shard.userData.spin));
+        });
       });
-      this.camera.position.y = 3.6 - fall * fall * 5.2;
-      this.camera.rotation.z += Math.sin(fall * 4.1) * .003;
-      const blackout = clamp((fall - 1.15) / 1.8, 0, 1);
-      if (this.transitionBlackout) this.transitionBlackout.style.opacity = blackout.toFixed(3);
-      this.glitch = Math.max(this.glitch, .55 + blackout * .45);
+
+      if (fall > .78 && !this.liminalFallAirborne) {
+        this.liminalFallAirborne = true;
+        this.freeCameraKeys.clear();
+      }
+      if (this.liminalFallAirborne) {
+        const air = fall - .78;
+        this.camera.position.y = 3.6 - air * air * 7.1;
+        this.camera.rotation.z += Math.sin(air * 5.2) * .006;
+        const blackout = clamp((air - .8) / .72, 0, 1);
+        if (this.transitionBlackout) {
+          this.transitionBlackout.style.background = "#000";
+          this.transitionBlackout.style.opacity = blackout.toFixed(3);
+        }
+        this.glitch = Math.max(this.glitch, .5 + blackout * .5);
+        if (air > 1.58) this.enterCityWorld();
+      }
     }
+  }
+
+  createEndlessCity() {
+    this.cityScene = new THREE.Scene();
+    this.cityScene.background = new THREE.Color(0x03060a);
+    this.cityScene.fog = new THREE.FogExp2(0x05080d, .0125);
+    this.cityScene.add(new THREE.HemisphereLight(0x71809a, 0x050608, .52));
+    const moon = new THREE.DirectionalLight(0x8ca6c9, 1.1);
+    moon.position.set(-28, 54, 17);
+    this.cityScene.add(moon);
+
+    const asphalt = new THREE.MeshStandardMaterial({ color: 0x080b0f, roughness: .94, metalness: .08 });
+    const pavement = new THREE.MeshStandardMaterial({ color: 0x16191d, roughness: .88 });
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), asphalt);
+    road.rotation.x = -Math.PI / 2;
+    road.receiveShadow = true;
+    this.cityScene.add(road);
+
+    const blockSize = 24;
+    const roadWidth = 9;
+    for (let lane = -5; lane <= 5; lane += 1) {
+      const coordinate = lane * 32;
+      const crossA = new THREE.Mesh(new THREE.PlaneGeometry(300, roadWidth), asphalt);
+      crossA.rotation.x = -Math.PI / 2;
+      crossA.position.set(0, .012, coordinate);
+      const crossB = crossA.clone();
+      crossB.rotation.z = Math.PI / 2;
+      crossB.position.set(coordinate, .013, 0);
+      this.cityScene.add(crossA, crossB);
+    }
+
+    const buildingMaterials = [
+      new THREE.MeshStandardMaterial({ color: 0x090d13, roughness: .82, metalness: .18, emissive: 0x020508 }),
+      new THREE.MeshStandardMaterial({ color: 0x101319, roughness: .9, emissive: 0x030405 }),
+      new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .76, metalness: .25, emissive: 0x010305 })
+    ];
+    for (let gx = -4; gx <= 4; gx += 1) {
+      for (let gz = -4; gz <= 4; gz += 1) {
+        const centerX = gx * 32 + 16;
+        const centerZ = gz * 32 + 16;
+        const seed = Math.abs(Math.sin(gx * 91.7 + gz * 47.3));
+        const count = seed > .55 ? 3 : 2;
+        for (let n = 0; n < count; n += 1) {
+          const h = 13 + ((seed * 97 + n * 13.7) % 1) * 43;
+          const w = 7 + ((seed * 31 + n * 5.1) % 1) * 7;
+          const d = 7 + ((seed * 53 + n * 8.3) % 1) * 7;
+          const building = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), buildingMaterials[(n + gx - gz + 30) % 3]);
+          building.position.set(centerX + (n - (count - 1) * .5) * 9, h * .5 + .16, centerZ + Math.sin(seed * 30 + n) * 6);
+          building.castShadow = true;
+          building.receiveShadow = true;
+          this.cityScene.add(building);
+          for (let floor = 3; floor < h - 2; floor += 4.2) {
+            const windows = new THREE.Mesh(
+              new THREE.PlaneGeometry(w * .66, .55),
+              new THREE.MeshBasicMaterial({
+                color: ((floor + n * 7) % 3) < 1 ? 0xc7a669 : 0x30445b,
+                transparent: true,
+                opacity: ((floor * 11 + n) % 5) < 2 ? .52 : .12,
+                toneMapped: false
+              })
+            );
+            windows.position.set(building.position.x, floor, building.position.z + d * .501);
+            this.cityScene.add(windows);
+          }
+        }
+        const plaza = new THREE.Mesh(new THREE.BoxGeometry(blockSize, .22, blockSize), pavement);
+        plaza.position.set(centerX, .1, centerZ);
+        plaza.receiveShadow = true;
+        this.cityScene.add(plaza);
+      }
+    }
+
+    this.cityLampLights = [];
+    const metal = new THREE.MeshStandardMaterial({ color: 0x11161b, roughness: .45, metalness: .75 });
+    const bulb = new THREE.MeshBasicMaterial({ color: 0xffdca2, toneMapped: false });
+    for (let i = -4; i <= 4; i += 1) {
+      [-4.7, 4.7].forEach((offset, side) => {
+        const lamp = new THREE.Group();
+        lamp.position.set(i * 16, 0, offset);
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(.055, .075, 4.8, 8), metal);
+        pole.position.y = 2.4;
+        const head = new THREE.Mesh(new THREE.SphereGeometry(.18, 10, 8), bulb);
+        head.position.y = 4.68;
+        lamp.add(pole, head);
+        if (i % 2 === 0) {
+          const light = new THREE.PointLight(0xffc977, 12, 15, 1.7);
+          light.position.y = 4.45;
+          lamp.add(light);
+          this.cityLampLights.push(light);
+        }
+        this.cityScene.add(lamp);
+      });
+    }
+  }
+
+  enterCityWorld() {
+    if (this.cityMode) return;
+    this.cityMode = true;
+    this.cityLanded = false;
+    this.cityLandingTime = 0;
+    this.cityImpactPlayed = false;
+    this.scene.visible = false;
+    this.renderer.shadowMap.enabled = true;
+    this.camera.near = .1;
+    this.camera.far = 420;
+    this.camera.position.set(0, 34, 14);
+    this.freeCameraPosition.set(0, 3.6, 14);
+    this.freeCameraVelocity.set(0, 0, 0);
+    if (this.transitionBlackout) {
+      this.transitionBlackout.style.background = "#000";
+      this.transitionBlackout.style.opacity = "1";
+    }
+  }
+
+  playCityImpact() {
+    const context = this.audioContext;
+    if (!context || !this.audioMaster) return;
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(92, now);
+    oscillator.frequency.exponentialRampToValueAtTime(31, now + .42);
+    gain.gain.setValueAtTime(.32, now);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + .48);
+    oscillator.connect(gain);
+    gain.connect(this.audioMaster);
+    oscillator.start(now);
+    oscillator.stop(now + .5);
+    if (this.footstepBuffer) {
+      const debris = context.createBufferSource();
+      const debrisGain = context.createGain();
+      debris.buffer = this.footstepBuffer;
+      debris.playbackRate.value = .48;
+      debrisGain.gain.setValueAtTime(.22, now);
+      debrisGain.gain.exponentialRampToValueAtTime(.0001, now + .7);
+      debris.connect(debrisGain);
+      debrisGain.connect(this.audioMaster);
+      debris.start(now);
+    }
+  }
+
+  updateCityCamera(delta) {
+    this.cityLandingTime += delta;
+    if (!this.cityLanded) {
+      const t = this.cityLandingTime;
+      this.camera.position.y = Math.max(3.62, 34 - t * t * 16.5);
+      this.camera.position.x = Math.sin(t * 1.4) * .3;
+      this.camera.rotation.order = "YXZ";
+      this.camera.rotation.set(this.freePitch, this.freeYaw, Math.sin(t * 5.4) * .008);
+      if (this.transitionBlackout) this.transitionBlackout.style.opacity = clamp(1 - t * 2.6, 0, 1).toFixed(3);
+      if (this.camera.position.y <= 3.63) {
+        this.cityLanded = true;
+        this.freeCameraPosition.copy(this.camera.position);
+        this.freeCameraPosition.y = 3.6;
+        if (!this.cityImpactPlayed) {
+          this.cityImpactPlayed = true;
+          this.playCityImpact();
+        }
+      }
+      return;
+    }
+
+    const forward = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
+    const right = new THREE.Vector3(Math.cos(this.freeYaw), 0, -Math.sin(this.freeYaw));
+    const input = new THREE.Vector3();
+    if (this.freeCameraKeys.has("KeyW")) input.add(forward);
+    if (this.freeCameraKeys.has("KeyS")) input.sub(forward);
+    if (this.freeCameraKeys.has("KeyD")) input.add(right);
+    if (this.freeCameraKeys.has("KeyA")) input.sub(right);
+    const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
+    const desired = input.lengthSq() ? input.normalize().multiplyScalar(running ? 6.2 : 3.5) : input;
+    this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 10, delta);
+    this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 10, delta);
+    this.freeCameraPosition.addScaledVector(this.freeCameraVelocity, delta);
+    if (this.freeCameraPosition.x > 140) this.freeCameraPosition.x -= 256;
+    if (this.freeCameraPosition.x < -140) this.freeCameraPosition.x += 256;
+    if (this.freeCameraPosition.z > 140) this.freeCameraPosition.z -= 256;
+    if (this.freeCameraPosition.z < -140) this.freeCameraPosition.z += 256;
+    this.camera.position.copy(this.freeCameraPosition);
+    this.camera.position.y = 3.6 + Math.sin(this.elapsed * (running ? 9 : 6.5)) * Math.min(.045, desired.length() * .012);
+    this.camera.rotation.set(this.freePitch, this.freeYaw, 0);
+    this.walkAmount = damp(this.walkAmount, input.lengthSq() ? 1 : 0, 9, delta);
+    this.walkPhase += delta * desired.length() * 2.4;
   }
 
   createBoard() {
@@ -2415,7 +2645,7 @@ class PrivateRoom {
     const context = this.audioContext;
     if (!context || !this.audioMaster) return;
     const now = context.currentTime;
-    const inCorridor = this.liminalEntered && !this.skyMode;
+    const inCorridor = this.liminalEntered && !this.skyMode && !this.cityMode;
     const x = this.freeCameraPosition.x;
     const stairApproach = inCorridor
       ? clamp((this.liminalStairStartX + 11.0 - x) / 11.0, 0, 1)
@@ -2442,7 +2672,11 @@ class PrivateRoom {
     const gust = Math.pow(clamp(gustA * .72 + gustB * .28, 0, 1), 2.8);
     const windBase = this.skyMode
       ? .055
-      : inCorridor
+      : this.cityMode
+        ? (this.cityLanded ? .018 : .115)
+        : this.liminalFallAirborne
+          ? .13
+          : inCorridor
         ? clamp(stairApproach * .008 + climb * .046 + roomDepth * .012, 0, .064)
         : 0;
     const windLevel = windBase * (.10 + gust * .90);
@@ -2470,7 +2704,7 @@ class PrivateRoom {
       .06
     );
 
-    const movingOnGround = this.freeCameraEnabled && !this.skyMode && this.walkAmount > .17;
+    const movingOnGround = this.freeCameraEnabled && !this.skyMode && (!this.cityMode || this.cityLanded) && this.walkAmount > .17;
     const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
     const footstepIndex = Math.floor(this.walkPhase / (Math.PI * 1.22));
     if (movingOnGround && footstepIndex !== this.lastFootstepIndex) {
@@ -3022,7 +3256,7 @@ class PrivateRoom {
   }
 
   updateTheme(delta) {
-    if (this.skyMode) return;
+    if (this.skyMode || this.cityMode) return;
     const target = this.themeDefinitions[this.activeTheme];
     const amount = 1 - Math.exp(-2.7 * delta);
     this.curtainMaterial.color.lerp(target.curtain, amount);
@@ -3041,6 +3275,10 @@ class PrivateRoom {
   }
 
   updateCamera(delta) {
+    if (this.cityMode) {
+      this.updateCityCamera(delta);
+      return;
+    }
     if (this.skyMode) {
       this.updateSkyCamera(delta);
       return;
@@ -3090,6 +3328,11 @@ class PrivateRoom {
   }
 
   updateEffects(delta) {
+    if (this.cityMode) {
+      this.glitch = 0;
+      this.postMaterial.uniforms.glitch.value = 0;
+      return;
+    }
     if (this.skyMode) {
       this.glitch = 0;
       this.postMaterial.uniforms.glitch.value = 0;
@@ -3132,6 +3375,12 @@ class PrivateRoom {
   }
 
   renderFrame() {
+    if (this.cityMode) {
+      this.renderer.setRenderTarget(null);
+      this.renderer.clear();
+      this.renderer.render(this.cityScene, this.camera);
+      return;
+    }
     if (this.skyMode) {
       this.renderer.setRenderTarget(null);
       this.renderer.clear();
