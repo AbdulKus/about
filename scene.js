@@ -55,9 +55,9 @@ class PrivateRoom {
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
     this.skyTransition = 0;
-    this.skyTransitionDuration = 2.45;
+    this.skyTransitionDuration = 2.8;
+    this.skyGlare = 0;
     this.skyCloudTime = 0;
-    this.liminalHatchFadeMaterials = [];
     this.shouldRestoreContacts = sessionStorage.getItem("about-return-to-contacts") === "1";
     this.transitionBlackout = document.querySelector("#transitionBlackout");
     this.glitch = 0;
@@ -1260,81 +1260,10 @@ class PrivateRoom {
       );
     });
 
-    const hatchY = this.liminalStairRise + .13;
-    const hatchWidth = 5.25;
-    const hatchDepth = 4.1;
-    const hatchX = exitX + hatchWidth * .5 - .22;
-    const frameMaterial = new THREE.MeshStandardMaterial({
-      color: 0x211d19,
-      roughness: .44,
-      metalness: .68,
-      emissive: 0x15110b,
-      emissiveIntensity: .2,
-      transparent: true,
-      opacity: 1
-    });
-
-    const hatch = new THREE.Group();
-    hatch.position.set(hatchX, hatchY, centerZ);
-    exit.add(hatch);
-    this.liminalHatchGroup = hatch;
-
-    [[hatchWidth, .17, .18, 0, -hatchDepth * .5],
-     [hatchWidth, .17, .18, 0, hatchDepth * .5],
-     [.18, .17, hatchDepth, -hatchWidth * .5, 0],
-     [.18, .17, hatchDepth, hatchWidth * .5, 0]].forEach(([w, h, d, x, z]) => {
-      const part = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMaterial);
-      part.position.set(x, 0, z);
-      hatch.add(part);
-    });
-
-    const skyPortal = new THREE.Mesh(
-      new THREE.PlaneGeometry(hatchWidth - .2, hatchDepth - .2),
-      new THREE.ShaderMaterial({
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        transparent: true,
-        uniforms: {
-          time: { value: 0 },
-          opacity: { value: 1 }
-        },
-        vertexShader: `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: `
-          varying vec2 vUv;
-          uniform float time;
-          uniform float opacity;
-          void main() {
-            float haze = sin(vUv.x * 8.0 + time * .12) * .025 + sin(vUv.y * 11.0 - time * .08) * .018;
-            vec3 low = vec3(.72, .88, .97);
-            vec3 high = vec3(.28, .60, .86);
-            vec3 col = mix(low, high, clamp(vUv.y + haze, 0.0, 1.0));
-            gl_FragColor = vec4(col, opacity);
-          }
-        `
-      })
-    );
-    skyPortal.rotation.x = -Math.PI / 2;
-    skyPortal.position.y = .075;
-    hatch.add(skyPortal);
-    this.liminalSkyPortal = skyPortal;
-
-    const lid = new THREE.Mesh(
-      new THREE.BoxGeometry(hatchWidth - .16, .12, hatchDepth - .18),
-      frameMaterial
-    );
-    lid.position.set(hatchWidth * .47, 1.48, 0);
-    lid.rotation.z = -1.08;
-    hatch.add(lid);
-    this.liminalHatchFadeMaterials = [frameMaterial];
-
-    const coolGlow = new THREE.PointLight(0xc7ebff, 31, 21, 1.55);
-    coolGlow.position.set(hatchX + .35, hatchY - 2.0, centerZ);
+    // There is deliberately no hatch geometry here: the final steps run
+    // straight into light, so no slab or frame can cut across the staircase.
+    const coolGlow = new THREE.PointLight(0xffffff, 54, 27, 1.35);
+    coolGlow.position.set(exitX + 2.8, this.liminalStairRise + 3.3, centerZ);
     exit.add(coolGlow);
     const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
     warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
@@ -1369,11 +1298,9 @@ class PrivateRoom {
     this.skyCloudMaterial = new THREE.ShaderMaterial({
       depthTest: false,
       depthWrite: false,
-      transparent: true,
       toneMapped: false,
       uniforms: {
         uTime: { value: 0 },
-        uReveal: { value: 0 },
         uAspect: { value: 1 },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(this.camera.fov * .5)) },
         uCameraPos: { value: new THREE.Vector3() },
@@ -1392,7 +1319,6 @@ class PrivateRoom {
         precision highp float;
         varying vec2 vUv;
         uniform float uTime;
-        uniform float uReveal;
         uniform float uAspect;
         uniform float uTanHalfFov;
         uniform vec3 uCameraPos;
@@ -1410,14 +1336,14 @@ class PrivateRoom {
           vec3 i = floor(p);
           vec3 f = fract(p);
           f = f * f * (3.0 - 2.0 * f);
-          float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+          float n000 = hash31(i);
           float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
           float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
           float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
           float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
           float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
           float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
-          float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+          float n111 = hash31(i + vec3(1.0));
           float nx00 = mix(n000, n100, f.x);
           float nx10 = mix(n010, n110, f.x);
           float nx01 = mix(n001, n101, f.x);
@@ -1425,53 +1351,37 @@ class PrivateRoom {
           return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
         }
 
-        float fbm(vec3 p) {
-          float value = 0.0;
-          float amplitude = .54;
-          for (int octave = 0; octave < 4; octave++) {
-            value += noise3(p) * amplitude;
-            p = p * 2.03 + vec3(13.7, 9.2, 17.1);
-            amplitude *= .49;
-          }
+        float fbm3(vec3 p) {
+          float value = noise3(p) * .57;
+          value += noise3(p * 2.02 + vec3(11.7, 4.3, 8.1)) * .29;
+          value += noise3(p * 4.07 + vec3(3.2, 15.4, 6.8)) * .14;
           return value;
         }
 
         float cloudDensity(vec3 p) {
-          vec3 drift = vec3(uTime * 1.65, sin(uTime * .075) * 2.1, uTime * .62);
+          vec3 drift = vec3(uTime * 1.35, sin(uTime * .07) * 1.8, uTime * .48);
           vec3 q = p + drift;
-          q.xz += vec2(
-            sin(q.z * .017 + uTime * .065),
-            sin(q.x * .014 - uTime * .052)
-          ) * 7.0;
+          q.xz += vec2(sin(q.z * .016), sin(q.x * .014)) * 6.2;
 
-          float macro = fbm(q * .017);
-          float body = fbm(q * .043 + vec3(7.4, -3.8, 12.1));
-          float fluff = noise3(q * .115 + vec3(-11.2, 5.6, 3.7));
-          float shape = macro * .57 + body * .35 + fluff * .08;
+          float body = fbm3(q * .021);
+          float detail = noise3(q * .082 + vec3(7.1, -3.4, 12.8));
+          float fluff = noise3(q * .157 + vec3(-5.6, 9.2, 2.4));
+          float shape = body * .76 + detail * .19 + fluff * .05;
 
           float relativeY = p.y - uCameraPos.y;
-          float lowerFade = smoothstep(-39.0, -17.0, relativeY);
-          float upperFade = 1.0 - smoothstep(22.0, 47.0, relativeY);
-          float billows = smoothstep(.515, .675, shape);
-          float rolling = .88 + .12 * sin(p.x * .018 + p.z * .014 + uTime * .11);
-          return billows * lowerFade * upperFade * rolling * 1.42;
+          float layer = smoothstep(-42.0, -18.0, relativeY)
+            * (1.0 - smoothstep(23.0, 49.0, relativeY));
+          return smoothstep(.515, .665, shape) * layer * 1.36;
         }
 
         vec3 skyColor(vec3 rd, vec3 sunDir) {
           float h = clamp(rd.y * .5 + .5, 0.0, 1.0);
-          vec3 horizon = vec3(.78, .90, .98);
-          vec3 zenith = vec3(.22, .52, .82);
-          vec3 below = vec3(.53, .73, .88);
-          vec3 color = mix(below, horizon, smoothstep(.02, .43, h));
-          color = mix(color, zenith, smoothstep(.43, 1.0, h));
-
-          float towardSun = max(dot(rd, sunDir), 0.0);
-          float broadGlow = pow(towardSun, 7.0);
-          float halo = pow(towardSun, 38.0);
-          float disc = smoothstep(.99915, .99978, towardSun);
-          color += vec3(1.0, .79, .52) * broadGlow * .16;
-          color += vec3(1.0, .91, .68) * halo * .36;
-          color += vec3(1.0, .965, .84) * disc * 1.25;
+          vec3 color = mix(vec3(.56, .75, .89), vec3(.80, .91, .98), smoothstep(.03, .43, h));
+          color = mix(color, vec3(.23, .53, .83), smoothstep(.43, 1.0, h));
+          float sun = max(dot(rd, sunDir), 0.0);
+          color += vec3(1.0, .82, .57) * pow(sun, 7.0) * .16;
+          color += vec3(1.0, .93, .73) * pow(sun, 34.0) * .34;
+          color += vec3(1.0, .98, .88) * smoothstep(.9991, .99976, sun) * 1.18;
           return color;
         }
 
@@ -1485,53 +1395,43 @@ class PrivateRoom {
           );
           vec3 ro = uCameraPos;
           vec3 sunDir = normalize(vec3(-.18, .93, .31));
-          vec3 sunColor = vec3(1.0, .88, .68);
-          vec3 color = skyColor(rd, sunDir);
+          vec3 sunColor = vec3(1.0, .89, .70);
+          vec3 background = skyColor(rd, sunDir);
           vec3 scattering = vec3(0.0);
           float transmittance = 1.0;
-          float staticJitter = hash31(vec3(gl_FragCoord.xy, 17.0)) * 2.35;
-          float t = 1.0 + staticJitter;
+          float t = 1.2 + hash31(vec3(gl_FragCoord.xy, 17.0)) * 3.1;
 
-          for (int i = 0; i < 38; i++) {
+          for (int i = 0; i < 24; i++) {
             vec3 pos = ro + rd * t;
             float density = cloudDensity(pos);
-            if (density > .004) {
-              float towardSunDensity = cloudDensity(pos + sunDir * 5.5);
-              float deeperSunDensity = cloudDensity(pos + sunDir * 13.0);
-              float sunlight = exp(-towardSunDensity * 1.35 - deeperSunDensity * .78);
-              float edge = 1.0 - smoothstep(.12, .93, density);
-              float forwardScatter = pow(max(dot(rd, sunDir), 0.0), 7.0);
+            if (density > .006) {
+              float edge = 1.0 - smoothstep(.10, .88, density);
+              float sunView = pow(max(dot(rd, sunDir), 0.0), 6.0);
+              float softLight = clamp(.30 + edge * .48 + sunView * .18, 0.0, 1.0);
 
-              vec3 shadow = vec3(.42, .53, .66);
-              vec3 halfLight = vec3(.76, .82, .88);
-              vec3 warmWhite = vec3(1.07, 1.035, .96);
-              float softLight = clamp(.22 + sunlight * .62 + edge * .34, 0.0, 1.0);
-              vec3 cloud = mix(shadow, halfLight, clamp(density * .82 + .18, 0.0, 1.0));
-              cloud = mix(cloud, warmWhite, softLight);
-
+              vec3 cloud = mix(vec3(.43, .55, .69), vec3(1.065, 1.035, .97), softLight);
               float pearlPhase = .5 + .5 * sin(
-                pos.x * .027 + pos.y * .041 + pos.z * .021 + uTime * .16
+                pos.x * .026 + pos.y * .039 + pos.z * .020 + uTime * .13
               );
-              vec3 pearl = mix(vec3(.89, .97, 1.06), vec3(1.06, .91, 1.0), pearlPhase);
-              cloud *= mix(vec3(1.0), pearl, edge * .13);
-              cloud += sunColor * forwardScatter * sunlight * .18;
+              vec3 pearl = mix(vec3(.91, .98, 1.055), vec3(1.05, .93, 1.01), pearlPhase);
+              cloud *= mix(vec3(1.0), pearl, edge * .10);
+              cloud += sunColor * sunView * edge * .13;
 
-              float stepLength = mix(2.45, 4.85, clamp(t / 165.0, 0.0, 1.0));
-              float alpha = 1.0 - exp(-density * stepLength * .43);
+              float stepLength = mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
+              float alpha = 1.0 - exp(-density * stepLength * .39);
               scattering += cloud * alpha * transmittance;
               transmittance *= 1.0 - alpha;
-              if (transmittance < .018) break;
+              if (transmittance < .025) break;
             }
-            t += mix(2.45, 4.85, clamp(t / 165.0, 0.0, 1.0));
-            if (t > 178.0) break;
+            t += mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
+            if (t > 168.0) break;
           }
 
-          color = color * transmittance + scattering;
-          float sunThroughClouds = pow(max(dot(rd, sunDir), 0.0), 11.0);
-          color += sunColor * sunThroughClouds * transmittance * .22;
-          float fineGrain = (hash31(vec3(gl_FragCoord.xy, 31.0)) - .5) * .0035;
-          color += fineGrain;
-          gl_FragColor = vec4(clamp(color, 0.0, 1.18), uReveal);
+          vec3 color = background * transmittance + scattering;
+          float sunThrough = pow(max(dot(rd, sunDir), 0.0), 10.0);
+          color += sunColor * sunThrough * transmittance * .20;
+          color += (hash31(vec3(gl_FragCoord.xy, 31.0)) - .5) * .003;
+          gl_FragColor = vec4(clamp(color, 0.0, 1.16), 1.0);
         }
       `
     });
@@ -1566,26 +1466,10 @@ class PrivateRoom {
         1
       );
       const reveal = this.skyTransition * this.skyTransition * (3 - 2 * this.skyTransition);
-      uniforms.uReveal.value = reveal;
-
-      const hatchFadeProgress = clamp((this.skyTransition - .04) / .78, 0, 1);
-      const hatchOpacity = 1 - hatchFadeProgress * hatchFadeProgress * (3 - 2 * hatchFadeProgress);
-      this.liminalHatchFadeMaterials.forEach((material) => {
-        material.opacity = hatchOpacity;
-      });
-      if (this.liminalSkyPortal?.material?.uniforms?.opacity) {
-        this.liminalSkyPortal.material.uniforms.opacity.value = hatchOpacity;
+      if (this.transitionBlackout) {
+        this.transitionBlackout.style.background = "#fff";
+        this.transitionBlackout.style.opacity = (1 - reveal).toFixed(3);
       }
-
-      if (this.skyTransition >= 1) {
-        if (this.liminalHatchGroup) this.liminalHatchGroup.visible = false;
-        this.scene.visible = false;
-        this.renderer.shadowMap.enabled = false;
-      }
-    }
-
-    if (this.liminalSkyPortal?.material?.uniforms?.time) {
-      this.liminalSkyPortal.material.uniforms.time.value = this.skyCloudTime;
     }
   }
 
@@ -1593,15 +1477,8 @@ class PrivateRoom {
     if (this.skyMode) return;
     this.skyMode = true;
     this.skyTransition = 0;
-    this.scene.visible = true;
-    if (this.liminalHatchGroup) this.liminalHatchGroup.visible = true;
-    this.liminalHatchFadeMaterials.forEach((material) => {
-      material.opacity = 1;
-    });
-    if (this.liminalSkyPortal?.material?.uniforms?.opacity) {
-      this.liminalSkyPortal.material.uniforms.opacity.value = 1;
-    }
-    this.skyCloudMaterial.uniforms.uReveal.value = 0;
+    this.scene.visible = false;
+    this.renderer.shadowMap.enabled = false;
     this.glitch = 0;
     this.nextGlitch = Number.POSITIVE_INFINITY;
     this.postMaterial.uniforms.glitch.value = 0;
@@ -1609,16 +1486,19 @@ class PrivateRoom {
     document.documentElement.style.setProperty("--glitch-x", "0px");
     const roomScreenEffects = document.querySelector(".screen-effects");
     if (roomScreenEffects) roomScreenEffects.style.display = "none";
-    if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
+    if (this.transitionBlackout) {
+      this.transitionBlackout.style.background = "#fff";
+      this.transitionBlackout.style.opacity = "1";
+    }
     this.doorPrompt?.classList.remove("is-visible");
 
-    // Keep the exact camera pose, held controls and momentum at the threshold.
-    // The old corridor is dissolved underneath the sky instead of swapping in
-    // a new camera position, so the last stair is crossed continuously.
+    // The scene swap happens behind a fully white frame. Camera coordinates,
+    // orientation, held controls and velocity remain untouched.
     this.skyBaseY = this.camera.position.y;
     this.camera.near = .1;
     this.camera.far = 420;
     this.camera.updateProjectionMatrix();
+    this.resize();
     this.updateCloudWorld(0);
   }
 
@@ -2498,6 +2378,16 @@ class PrivateRoom {
     this.camera.rotation.order = "YXZ";
     this.camera.rotation.set(this.freePitch, this.freeYaw, Math.sin(this.walkPhase) * .008 * this.walkAmount);
 
+    if (!this.skyMode && this.liminalEntered) {
+      const climb = clamp(stairHeight / this.liminalStairRise, 0, 1);
+      const glareProgress = clamp((climb - .58) / .40, 0, 1);
+      this.skyGlare = glareProgress * glareProgress * (3 - 2 * glareProgress);
+      if (this.transitionBlackout) {
+        this.transitionBlackout.style.background = this.skyGlare > 0 ? "#fff" : "#000";
+        this.transitionBlackout.style.opacity = this.skyGlare.toFixed(3);
+      }
+    }
+
     if (!this.skyMode
       && this.liminalEntered
       && this.freeCameraPosition.x <= this.liminalStairExitX
@@ -2641,7 +2531,9 @@ class PrivateRoom {
   resize() {
     const width = Math.max(1, window.innerWidth);
     const height = Math.max(1, window.innerHeight);
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    const pixelRatio = this.skyMode
+      ? Math.min(window.devicePixelRatio || 1, this.isTouch ? .72 : .9)
+      : Math.min(window.devicePixelRatio || 1, 1.5);
     const renderScale = width < 760 ? .78 : .82;
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
@@ -2788,19 +2680,9 @@ class PrivateRoom {
 
   renderFrame() {
     if (this.skyMode) {
-      if (this.skyTransition < 1 && this.scene.visible) {
-        this.renderer.setRenderTarget(this.renderTarget);
-        this.renderer.clear();
-        this.renderer.render(this.scene, this.camera);
-        this.renderer.setRenderTarget(null);
-        this.renderer.clear();
-        this.renderer.render(this.postScene, this.postCamera);
-        this.renderer.render(this.skyScene, this.skyRenderCamera);
-      } else {
-        this.renderer.setRenderTarget(null);
-        this.renderer.clear();
-        this.renderer.render(this.skyScene, this.skyRenderCamera);
-      }
+      this.renderer.setRenderTarget(null);
+      this.renderer.clear();
+      this.renderer.render(this.skyScene, this.skyRenderCamera);
       return;
     }
     this.renderer.setRenderTarget(this.renderTarget);
