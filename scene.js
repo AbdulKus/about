@@ -1982,6 +1982,7 @@ class PrivateRoom {
 
   createCityChunk(gridX, gridZ) {
     const chunk = new THREE.Group();
+    chunk.userData.colliders = [];
     const size = this.cityChunkSize;
     const seed = Math.abs(Math.sin(gridX * 127.13 + gridZ * 311.71)) + .013;
     const seeded = (salt) => {
@@ -2015,6 +2016,12 @@ class PrivateRoom {
       building.castShadow = true;
       building.receiveShadow = true;
       chunk.add(building);
+      chunk.userData.colliders.push({
+        x: building.position.x,
+        z: building.position.z,
+        halfWidth: width * .5,
+        halfDepth: depth * .5
+      });
 
       if (style === 0 || style === 3) {
         const tierHeight = 6 + seeded(plotIndex + 51) * 15;
@@ -2113,6 +2120,19 @@ class PrivateRoom {
     return chunk;
   }
 
+  isCityWalkBlocked(x, z) {
+    if (!this.cityChunks?.length) return false;
+    const radius = .58;
+    return this.cityChunks.some((chunk) => {
+      const localX = x - chunk.position.x;
+      const localZ = z - chunk.position.z;
+      return chunk.userData.colliders.some((box) =>
+        Math.abs(localX - box.x) < box.halfWidth + radius
+        && Math.abs(localZ - box.z) < box.halfDepth + radius
+      );
+    });
+  }
+
   updateEndlessCity() {
     if (!this.cityChunks?.length) return;
     const span = this.cityChunkSize * this.cityChunkGrid;
@@ -2208,7 +2228,18 @@ class PrivateRoom {
     const desired = input.lengthSq() ? input.normalize().multiplyScalar(running ? 6.2 : 3.5) : input;
     this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 10, delta);
     this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 10, delta);
-    this.freeCameraPosition.addScaledVector(this.freeCameraVelocity, delta);
+    const nextCityX = this.freeCameraPosition.x + this.freeCameraVelocity.x * delta;
+    const nextCityZ = this.freeCameraPosition.z + this.freeCameraVelocity.z * delta;
+    if (!this.isCityWalkBlocked(nextCityX, this.freeCameraPosition.z)) {
+      this.freeCameraPosition.x = nextCityX;
+    } else {
+      this.freeCameraVelocity.x = 0;
+    }
+    if (!this.isCityWalkBlocked(this.freeCameraPosition.x, nextCityZ)) {
+      this.freeCameraPosition.z = nextCityZ;
+    } else {
+      this.freeCameraVelocity.z = 0;
+    }
     this.updateEndlessCity();
     this.camera.position.copy(this.freeCameraPosition);
     this.camera.position.y = 3.6 + Math.sin(this.elapsed * (running ? 9 : 6.5)) * Math.min(.045, desired.length() * .012);
