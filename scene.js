@@ -1421,6 +1421,8 @@ class PrivateRoom {
     this.postMaterial.uniforms.glitch.value = 0;
     document.documentElement.style.setProperty("--glitch-opacity", "0");
     document.documentElement.style.setProperty("--glitch-x", "0px");
+    const roomScreenEffects = document.querySelector(".screen-effects");
+    if (roomScreenEffects) roomScreenEffects.style.display = "none";
     if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
     this.doorPrompt?.classList.remove("is-visible");
     this.freeCameraKeys.clear();
