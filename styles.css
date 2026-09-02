@@ -237,6 +237,18 @@ body.is-sky-mode .noise {
   mix-blend-mode: soft-light;
 }
 
+@media (pointer: coarse), (max-width: 760px) {
+  body.is-sky-mode .noise {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: .045;
+    filter: none;
+    animation: sky-mobile-grain 480ms steps(2, end) infinite;
+    will-change: background-position;
+  }
+}
+
 body.is-sky-mode #world {
   image-rendering: auto;
 }
@@ -361,6 +373,14 @@ body.is-ready .loader-curtain {
   50% { transform: translate3d(1%, 2%, 0); }
   75% { transform: translate3d(-1%, -1%, 0); }
   100% { transform: translate3d(2%, 1%, 0); }
+}
+
+@keyframes sky-mobile-grain {
+  0% { transform: none; background-position: 0 0; }
+  25% { transform: none; background-position: 19px -13px; }
+  50% { transform: none; background-position: -11px 23px; }
+  75% { transform: none; background-position: 27px 9px; }
+  100% { transform: none; background-position: -17px -21px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

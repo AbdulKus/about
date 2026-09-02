@@ -5,12 +5,13 @@ import {
   SKY_MEADOW_TIMING,
   SKY_NOISE_GLSL,
   sampleSkyMeadowHeight
-} from "./sky-meadow.js?v=4";
+} from "./sky-meadow.js?v=5";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, amount) => a + (b - a) * amount;
 const random = (min, max) => min + Math.random() * (max - min);
 const damp = (current, target, smoothing, delta) => lerp(current, target, 1 - Math.exp(-smoothing * delta));
+const smoothstep01 = (value) => value * value * (3 - 2 * value);
 
 class PrivateRoom {
   constructor(canvas) {
@@ -199,6 +200,7 @@ class PrivateRoom {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.autoClear = false;
+    this.createScreenNoiseTexture();
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x090002);
@@ -220,6 +222,31 @@ class PrivateRoom {
     this.createDust();
     this.bindEvents();
     this.resize();
+  }
+
+  createScreenNoiseTexture() {
+    const noiseElement = document.querySelector(".noise");
+    if (!noiseElement) return;
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const context = canvas.getContext("2d");
+    const image = context.createImageData(size, size);
+    let seed = 1729;
+    for (let index = 0; index < image.data.length; index += 4) {
+      seed = seed * 16807 % 2147483647;
+      const value = 52 + Math.floor((seed / 2147483647) * 178);
+      image.data[index] = value;
+      image.data[index + 1] = value;
+      image.data[index + 2] = value;
+      image.data[index + 3] = 255;
+    }
+    context.putImageData(image, 0, 0);
+    const deviceScale = clamp(window.devicePixelRatio || 1, 1, 3);
+    const cssTileSize = Math.round(size / deviceScale);
+    noiseElement.style.backgroundImage = `url(${canvas.toDataURL("image/png")})`;
+    noiseElement.style.backgroundSize = `${cssTileSize}px ${cssTileSize}px`;
+    noiseElement.style.backgroundRepeat = "repeat";
   }
 
   createMaterials() {
@@ -1504,7 +1531,8 @@ class PrivateRoom {
         uRight: { value: new THREE.Vector3(1, 0, 0) },
         uUp: { value: new THREE.Vector3(0, 1, 0) },
         uCompositeMode: { value: 0 },
-        uMeadowBaseY: { value: 0 }
+        uMeadowBaseY: { value: 0 },
+        uDoorDistance: { value: 0 }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -1526,6 +1554,7 @@ class PrivateRoom {
         uniform vec3 uUp;
         uniform float uCompositeMode;
         uniform float uMeadowBaseY;
+        uniform float uDoorDistance;
 
         ${SKY_HILL_GLSL}
 
@@ -1605,10 +1634,12 @@ class PrivateRoom {
           float transmittance = 1.0;
           float t = 1.2 + hash31(vec3(gl_FragCoord.xy, 17.0)) * 3.1;
 
-          for (int i = 0; i < 24; i++) {
+          for (int i = 0; i < 28; i++) {
+            if (uCompositeMode < .5 && i >= 24) break;
             vec3 pos = ro + rd * t;
-            if (uCompositeMode > .5) {
-              if (i >= 16) break;
+            if (uCompositeMode > 1.5) {
+              if (t >= uDoorDistance) break;
+            } else if (uCompositeMode > .5) {
               float groundY = uMeadowBaseY + hillHeight(pos.xz);
               if (pos.y <= groundY + .14) break;
             }
@@ -1626,14 +1657,19 @@ class PrivateRoom {
               cloud *= mix(vec3(1.0), pearl, edge * .10);
               cloud += sunColor * sunView * edge * .13;
 
-              float stepLength = mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
+              float stepLength = uCompositeMode > .5
+                ? mix(3.15, 16.0, smoothstep(12.0, 100.0, t))
+                : mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
               float alpha = 1.0 - exp(-density * stepLength * .39);
               scattering += cloud * alpha * transmittance;
               transmittance *= 1.0 - alpha;
               if (transmittance < .025) break;
             }
-            t += mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
-            if (t > 168.0) break;
+            t += uCompositeMode > .5
+              ? mix(3.15, 16.0, smoothstep(12.0, 100.0, t))
+              : mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
+            if (uCompositeMode < .5 && t > 168.0) break;
+            if (uCompositeMode > .5 && uCompositeMode < 1.5 && t > 238.0) break;
           }
 
           if (uCompositeMode > .5) {
@@ -1673,6 +1709,23 @@ class PrivateRoom {
     overlayQuad.frustumCulled = false;
     this.skyCloudOverlayScene.add(overlayQuad);
     this.skyCloudOverlayQuad = overlayQuad;
+
+    this.skyDoorCloudScene = new THREE.Scene();
+    this.skyDoorCloudMaterial = this.skyCloudMaterial.clone();
+    this.skyDoorCloudMaterial.uniforms.uCompositeMode.value = 2;
+    this.skyDoorCloudMaterial.transparent = true;
+    this.skyDoorCloudMaterial.depthTest = false;
+    this.skyDoorCloudMaterial.depthWrite = false;
+    this.skyDoorCloudMaterial.stencilWrite = true;
+    this.skyDoorCloudMaterial.stencilRef = 2;
+    this.skyDoorCloudMaterial.stencilFunc = THREE.EqualStencilFunc;
+    this.skyDoorCloudMaterial.stencilFail = THREE.KeepStencilOp;
+    this.skyDoorCloudMaterial.stencilZFail = THREE.KeepStencilOp;
+    this.skyDoorCloudMaterial.stencilZPass = THREE.KeepStencilOp;
+    const doorCloudQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.skyDoorCloudMaterial);
+    doorCloudQuad.frustumCulled = false;
+    this.skyDoorCloudScene.add(doorCloudQuad);
+    this.skyDoorCloudQuad = doorCloudQuad;
     this.createSkyMeadowWorld();
   }
 
@@ -1697,7 +1750,7 @@ class PrivateRoom {
 
     const hillFunctionGlsl = SKY_HILL_GLSL;
     const noiseFunctionGlsl = SKY_NOISE_GLSL;
-    const terrainSegments = this.isTouch ? 320 : 480;
+    const terrainSegments = this.isTouch ? 384 : 480;
     const terrainGeometry = new THREE.PlaneGeometry(
       SKY_MEADOW_SETTINGS.terrainSize,
       SKY_MEADOW_SETTINGS.terrainSize,
@@ -1784,9 +1837,11 @@ class PrivateRoom {
           color += vec3(.22, .24, .08) * pow(sunlight, 5.0) * .14;
           float fog = smoothstep(170.0, 390.0, distanceToCamera);
           color = mix(color, vec3(.79, .89, .93), fog);
-          gl_FragColor = vec4(color, 1.0);
+          if (uOpacity < .01) discard;
+          gl_FragColor = vec4(color, uOpacity);
         }
       `,
+      transparent: true,
       depthWrite: true,
       side: THREE.DoubleSide
     });
@@ -1904,11 +1959,13 @@ class PrivateRoom {
           color *= vTint * vBladeTone;
           color += vec3(.10, .12, .025) * pow(vHeight, 4.0);
           color = mix(color, vec3(.79, .89, .93), vFog);
-          gl_FragColor = vec4(color, 1.0);
+          if (uOpacity < .01) discard;
+          gl_FragColor = vec4(color, uOpacity);
         }
       `,
       depthTest: true,
       depthWrite: true,
+      transparent: true,
       side: THREE.DoubleSide
     });
 
@@ -2073,11 +2130,13 @@ class PrivateRoom {
           vec3 center = vec3(1.0, .62, .055) * vTone;
           vec3 color = vPart < .5 ? stem : (vPart < 1.5 ? petals : center);
           color = mix(color, vec3(.79, .89, .93), vFog);
-          gl_FragColor = vec4(color, 1.0);
+          if (uOpacity < .01) discard;
+          gl_FragColor = vec4(color, uOpacity);
         }
       `,
       depthWrite: true,
       depthTest: true,
+      transparent: true,
       side: THREE.DoubleSide
     });
 
@@ -2244,10 +2303,6 @@ class PrivateRoom {
       metalness: .9
     });
     this.skyDoorMaterials.push(doorMaterial, panelMaterial, frameMaterial, brassMaterial);
-    this.skyDoorMaterials.forEach((material) => {
-      material.transparent = true;
-      material.opacity = 0;
-    });
 
     const doorShape = new THREE.Shape();
     doorShape.moveTo(-1.82, 0);
@@ -2362,8 +2417,8 @@ class PrivateRoom {
       roughness: .82
     });
     const mushroomWhiteMaterial = new THREE.MeshStandardMaterial({
-      color: 0xfff4d8,
-      roughness: .76
+      color: 0x8a5832,
+      roughness: .84
     });
     const mushroomRedMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -2722,7 +2777,7 @@ class PrivateRoom {
   }
 
   spawnSkyDoor() {
-    if (this.skyDoorSpawned || !this.skyDoorRoot) return;
+    if (this.skyDoorSpawned || !this.skyDoorRoot || !this.skyMeadowGrounded) return;
     this.skyDoorSpawned = true;
     this.skyDoorReveal = 0;
     const direction = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
@@ -2843,13 +2898,10 @@ class PrivateRoom {
       0,
       1
     );
-    const rawProgress = this.skyMeadowProgress;
-    const progress = clamp(rawProgress - .12 * rawProgress * (1 - rawProgress), 0, 1);
+    const progress = this.skyMeadowProgress;
     const contactBaseY = this.skyBaseY
       - this.freeEyeHeight
       - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
-
-    if (rawProgress >= .55 && !this.skyDoorSpawned) this.spawnSkyDoor();
 
     if (!this.skyMeadowGrounded) {
       this.skyMeadowBaseY = damp(this.skyMeadowBaseY, contactBaseY, .62, delta);
@@ -2875,21 +2927,19 @@ class PrivateRoom {
     this.skyMeadowTerrain.position.z = Math.round(this.freeCameraPosition.z / 12) * 12;
     this.updateSkyMeadowTiles();
 
-    const terrainOpacity = clamp(progress / .12, 0, 1);
-    const plantOpacity = clamp((progress - .035) / .18, 0, 1);
+    const terrainOpacity = smoothstep01(clamp((progress - .015) / .47, 0, 1));
+    const plantOpacity = smoothstep01(clamp((progress - .14) / .58, 0, 1));
+    const flowerOpacity = smoothstep01(clamp((progress - .4) / .55, 0, 1));
     this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = terrainOpacity;
     this.skyMeadowTerrainMaterial.uniforms.uTime.value = this.elapsed;
     this.skyMeadowGrassMaterial.uniforms.uOpacity.value = plantOpacity;
     this.skyMeadowGrassMaterial.uniforms.uTime.value = this.elapsed;
-    this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = plantOpacity;
+    this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = flowerOpacity;
     this.skyMeadowFlowerMaterial.uniforms.uTime.value = this.elapsed;
 
     if (this.skyDoorSpawned) {
       this.skyDoorReveal = clamp(this.skyDoorReveal + delta / 4.2, 0, 1);
       const reveal = this.skyDoorReveal * this.skyDoorReveal * (3 - 2 * this.skyDoorReveal);
-      this.skyDoorMaterials.forEach((material) => {
-        material.opacity = reveal;
-      });
       if (this.skyDoorLight) {
         this.skyDoorLight.intensity = reveal * (2.8 + Math.sin(this.elapsed * 1.7) * .35);
       }
@@ -2926,6 +2976,28 @@ class PrivateRoom {
       overlayUniforms.uRight.value.copy(right);
       overlayUniforms.uUp.value.copy(up);
       overlayUniforms.uMeadowBaseY.value = uniforms.uMeadowBaseY.value;
+    }
+    if (this.skyDoorCloudMaterial) {
+      const doorUniforms = this.skyDoorCloudMaterial.uniforms;
+      doorUniforms.uTime.value = uniforms.uTime.value;
+      doorUniforms.uAspect.value = uniforms.uAspect.value;
+      doorUniforms.uTanHalfFov.value = uniforms.uTanHalfFov.value;
+      doorUniforms.uCameraPos.value.copy(uniforms.uCameraPos.value);
+      doorUniforms.uSpawnPos.value.copy(uniforms.uSpawnPos.value);
+      doorUniforms.uForward.value.copy(forward);
+      doorUniforms.uRight.value.copy(right);
+      doorUniforms.uUp.value.copy(up);
+      doorUniforms.uMeadowBaseY.value = uniforms.uMeadowBaseY.value;
+      if (this.skyDoorSpawned && this.skyDoorRoot) {
+        this.skyDoorWorldPosition ??= new THREE.Vector3();
+        this.skyDoorRoot.getWorldPosition(this.skyDoorWorldPosition);
+        doorUniforms.uDoorDistance.value = Math.max(
+          .5,
+          this.camera.position.distanceTo(this.skyDoorWorldPosition) - .45
+        );
+      } else {
+        doorUniforms.uDoorDistance.value = 0;
+      }
     }
 
     if (this.skyMode) {
@@ -2965,7 +3037,7 @@ class PrivateRoom {
     if (this.skyMeadowGrassMaterial) this.skyMeadowGrassMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowFlowerMaterial) this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = 0;
     this.skyDoorMaterials?.forEach((material) => {
-      material.opacity = 0;
+      material.opacity = 1;
     });
     this.scene.visible = false;
     this.renderer.shadowMap.enabled = false;
@@ -7295,7 +7367,7 @@ class PrivateRoom {
     const width = Math.max(1, window.innerWidth);
     const height = Math.max(1, window.innerHeight);
     const pixelRatio = this.skyMode
-      ? Math.min(window.devicePixelRatio || 1, this.isTouch ? .72 : .9)
+      ? Math.min(window.devicePixelRatio || 1, this.isTouch ? .86 : .9)
       : Math.min(window.devicePixelRatio || 1, 1.5);
     const renderScale = width < 760 ? .78 : .82;
     this.renderer.setPixelRatio(pixelRatio);
@@ -7484,6 +7556,7 @@ class PrivateRoom {
       if (this.skyMeadowRoot?.visible) {
         this.renderer.render(this.skyMeadowScene, this.camera);
         this.renderer.render(this.skyCloudOverlayScene, this.skyRenderCamera);
+        this.renderer.render(this.skyDoorCloudScene, this.skyRenderCamera);
       }
       return;
     }

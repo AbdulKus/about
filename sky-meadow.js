@@ -1,6 +1,6 @@
 export const SKY_MEADOW_TIMING = Object.freeze({
   startDelay: 90,
-  riseDuration: 210,
+  riseDuration: 185,
   doorDelay: 8
 });
 
