@@ -1993,16 +1993,94 @@ class PrivateRoom {
       roughness: .78,
       metalness: .14
     }));
+    const makeSurfaceTexture = (kind) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 256;
+      const context = canvas.getContext("2d");
+      context.fillStyle = kind === "road" ? "#171b20" : "#292d31";
+      context.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 1800; i += 1) {
+        const value = Math.floor(20 + Math.random() * 38);
+        const alpha = .025 + Math.random() * .09;
+        context.fillStyle = `rgba(${value},${value + 2},${value + 4},${alpha})`;
+        const radius = Math.random() < .9 ? 1 : 2 + Math.random() * 3;
+        context.fillRect(Math.random() * 256, Math.random() * 256, radius, radius);
+      }
+      context.strokeStyle = kind === "road" ? "rgba(95,105,115,.12)" : "rgba(8,10,13,.32)";
+      context.lineWidth = kind === "road" ? 1 : 2;
+      if (kind === "road") {
+        for (let crack = 0; crack < 9; crack += 1) {
+          context.beginPath();
+          let x = Math.random() * 256;
+          let y = Math.random() * 256;
+          context.moveTo(x, y);
+          for (let point = 0; point < 6; point += 1) {
+            x += (Math.random() - .5) * 24;
+            y += 8 + Math.random() * 18;
+            context.lineTo(x, y);
+          }
+          context.stroke();
+        }
+      } else {
+        for (let tile = 0; tile <= 256; tile += 32) {
+          context.beginPath();
+          context.moveTo(tile, 0);
+          context.lineTo(tile, 256);
+          context.moveTo(0, tile);
+          context.lineTo(256, tile);
+          context.stroke();
+        }
+      }
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(kind === "road" ? 8 : 4, kind === "road" ? 8 : 4);
+      return texture;
+    };
+    const roadTexture = makeSurfaceTexture("road");
+    const pavementTexture = makeSurfaceTexture("pavement");
+
     this.cityRoofMaterial = new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .68, metalness: .42 });
     this.cityAsphaltMaterial = new THREE.MeshStandardMaterial({
-      color: 0x070b10,
-      roughness: .64,
-      metalness: .3,
+      color: 0x151a20,
+      map: roadTexture,
+      roughness: .7,
+      metalness: .28,
       envMapIntensity: .5
     });
-    this.cityPavementMaterial = new THREE.MeshStandardMaterial({ color: 0x171b21, roughness: .9 });
+    this.cityPavementMaterial = new THREE.MeshStandardMaterial({
+      color: 0x262b30,
+      map: pavementTexture,
+      roughness: .9
+    });
     this.cityMetalMaterial = new THREE.MeshStandardMaterial({ color: 0x111820, roughness: .38, metalness: .82 });
-    this.cityLampMaterial = new THREE.MeshBasicMaterial({ color: 0xffd69a, toneMapped: false });
+    this.cityConcreteDetailMaterial = new THREE.MeshStandardMaterial({ color: 0x30363b, roughness: .88 });
+    this.cityGlassMaterial = new THREE.MeshStandardMaterial({
+      color: 0x203849,
+      emissive: 0x091923,
+      emissiveIntensity: .65,
+      roughness: .18,
+      metalness: .52
+    });
+    this.cityWetMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x111923,
+      roughness: .12,
+      metalness: .42,
+      transparent: true,
+      opacity: .58,
+      depthWrite: false
+    });
+    this.cityLampMaterial = new THREE.MeshBasicMaterial({ color: 0xffffd5, toneMapped: false });
+    const lampGlowCanvas = document.createElement("canvas");
+    lampGlowCanvas.width = lampGlowCanvas.height = 64;
+    const lampGlowContext = lampGlowCanvas.getContext("2d");
+    const lampGlowGradient = lampGlowContext.createRadialGradient(32, 32, 2, 32, 32, 32);
+    lampGlowGradient.addColorStop(0, "rgba(255,247,211,1)");
+    lampGlowGradient.addColorStop(.22, "rgba(255,210,137,.7)");
+    lampGlowGradient.addColorStop(1, "rgba(255,185,96,0)");
+    lampGlowContext.fillStyle = lampGlowGradient;
+    lampGlowContext.fillRect(0, 0, 64, 64);
+    this.cityLampGlowTexture = new THREE.CanvasTexture(lampGlowCanvas);
 
     this.cityChunkSize = 64;
     this.cityChunkGrid = 5;
@@ -2020,6 +2098,9 @@ class PrivateRoom {
   createCityChunk(gridX, gridZ) {
     const chunk = new THREE.Group();
     chunk.userData.colliders = [];
+    const detailGroup = new THREE.Group();
+    chunk.userData.details = detailGroup;
+    chunk.add(detailGroup);
     const size = this.cityChunkSize;
     const seed = Math.abs(Math.sin(gridX * 127.13 + gridZ * 311.71)) + .013;
     const seeded = (salt) => {
@@ -2098,7 +2179,107 @@ class PrivateRoom {
         sign.position.set(building.position.x, 4.2 + seeded(plotIndex + 90) * 8, building.position.z + depth * .505);
         chunk.add(sign);
       }
+
+      const storefront = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.min(width * .68, 8.5), 2.15, .22),
+        this.cityGlassMaterial
+      );
+      storefront.position.set(building.position.x, 1.4, building.position.z + depth * .51);
+      detailGroup.add(storefront);
+      const awning = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.min(width * .76, 9.4), .13, .92),
+        this.cityBuildingMaterials[(style + 2) % 4]
+      );
+      awning.position.set(building.position.x, 2.68, building.position.z + depth * .54);
+      awning.rotation.x = -.13;
+      detailGroup.add(awning);
+
+      for (let unitIndex = 0; unitIndex < 2; unitIndex += 1) {
+        const unit = new THREE.Mesh(new THREE.BoxGeometry(.72, .52, .28), this.cityConcreteDetailMaterial);
+        unit.position.set(
+          building.position.x + width * .505,
+          5.4 + unitIndex * 4.2 + seeded(plotIndex + unitIndex + 140),
+          building.position.z + (unitIndex ? -.22 : .24) * depth
+        );
+        detailGroup.add(unit);
+        const fan = new THREE.Mesh(
+          new THREE.CircleGeometry(.19, 10),
+          new THREE.MeshBasicMaterial({ color: 0x10151a })
+        );
+        fan.rotation.y = Math.PI / 2;
+        fan.position.set(unit.position.x + .365, unit.position.y, unit.position.z);
+        detailGroup.add(fan);
+      }
+
+      for (let ventIndex = 0; ventIndex < 2; ventIndex += 1) {
+        const vent = new THREE.Mesh(
+          new THREE.CylinderGeometry(.22, .28, .75 + ventIndex * .18, 8),
+          this.cityMetalMaterial
+        );
+        vent.position.set(
+          building.position.x + (ventIndex ? -.22 : .24) * width,
+          baseHeight + .55,
+          building.position.z + (ventIndex ? .18 : -.2) * depth
+        );
+        detailGroup.add(vent);
+      }
     });
+
+    const drainMaterial = new THREE.MeshStandardMaterial({ color: 0x090c0f, roughness: .54, metalness: .76 });
+    for (let detailIndex = 0; detailIndex < 3; detailIndex += 1) {
+      const puddle = new THREE.Mesh(
+        new THREE.CircleGeometry(1.1 + seeded(180 + detailIndex) * 1.5, 18),
+        this.cityWetMaterial
+      );
+      puddle.rotation.x = -Math.PI / 2;
+      puddle.scale.y = .42 + seeded(190 + detailIndex) * .45;
+      puddle.position.set(
+        -24 + seeded(200 + detailIndex) * 48,
+        .018,
+        detailIndex % 2 ? 2.7 : -2.7
+      );
+      detailGroup.add(puddle);
+    }
+
+    const manhole = new THREE.Mesh(new THREE.CylinderGeometry(.72, .72, .045, 24), drainMaterial);
+    manhole.position.set(-13 + seeded(220) * 26, .015, 1.9);
+    detailGroup.add(manhole);
+    for (let drainIndex = 0; drainIndex < 4; drainIndex += 1) {
+      const drain = new THREE.Mesh(new THREE.BoxGeometry(1.15, .035, .32), drainMaterial);
+      drain.position.set(drainIndex % 2 ? -5.25 : 5.25, .025, drainIndex < 2 ? -18 : 18);
+      detailGroup.add(drain);
+    }
+
+    const binMaterial = new THREE.MeshStandardMaterial({ color: 0x14201d, roughness: .76, metalness: .28 });
+    [-1, 1].forEach((side, detailIndex) => {
+      const bin = new THREE.Mesh(new THREE.BoxGeometry(.82, 1.12, .74), binMaterial);
+      bin.position.set(side * 7.2, .68, side * (10.5 + seeded(240 + detailIndex) * 8));
+      detailGroup.add(bin);
+      const lid = new THREE.Mesh(new THREE.BoxGeometry(.9, .1, .8), this.cityMetalMaterial);
+      lid.position.set(bin.position.x, 1.27, bin.position.z);
+      lid.rotation.z = side * .06;
+      detailGroup.add(lid);
+    });
+    const hydrant = new THREE.Group();
+    const hydrantMaterial = new THREE.MeshStandardMaterial({ color: 0x6f1d18, roughness: .58, metalness: .32 });
+    const hydrantBody = new THREE.Mesh(new THREE.CylinderGeometry(.18, .22, .72, 10), hydrantMaterial);
+    hydrantBody.position.y = .48;
+    const hydrantTop = new THREE.Mesh(new THREE.SphereGeometry(.22, 10, 7), hydrantMaterial);
+    hydrantTop.position.y = .84;
+    hydrant.add(hydrantBody, hydrantTop);
+    hydrant.position.set(-6.6, 0, 12.4);
+    detailGroup.add(hydrant);
+
+    const crosswalkMaterial = new THREE.MeshBasicMaterial({ color: 0x747878, transparent: true, opacity: .48 });
+    for (let stripe = -4; stripe <= 4; stripe += 1) {
+      const crosswalk = new THREE.Mesh(
+        new THREE.PlaneGeometry(.5, 3.8),
+        crosswalkMaterial
+      );
+      crosswalk.rotation.x = -Math.PI / 2;
+      crosswalk.position.set(stripe * .9, .019, 6.1);
+      detailGroup.add(crosswalk);
+    }
 
     const markingMaterial = new THREE.MeshBasicMaterial({ color: 0xb9a66d, toneMapped: false });
     for (let offset = -27; offset <= 27; offset += 8) {
@@ -2118,11 +2299,22 @@ class PrivateRoom {
       pole.position.y = 2.47;
       const arm = new THREE.Mesh(new THREE.BoxGeometry(1.1, .075, .075), this.cityMetalMaterial);
       arm.position.set(x > 0 ? -.48 : .48, 4.82, 0);
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(.16, 10, 7), this.cityLampMaterial);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(.21, 12, 8), this.cityLampMaterial);
       bulb.position.set(x > 0 ? -.94 : .94, 4.72, 0);
-      lamp.add(pole, arm, bulb);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this.cityLampGlowTexture,
+        color: 0xffd69a,
+        transparent: true,
+        opacity: .78,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: true
+      }));
+      halo.position.copy(bulb.position);
+      halo.scale.set(3.8, 3.8, 1);
+      lamp.add(pole, arm, bulb, halo);
       if ((gridX + gridZ + lightIndex + 20) % 4 === 0) {
-        const light = new THREE.PointLight(0xffc77d, 8.5, 13, 1.8);
+        const light = new THREE.PointLight(0xffc77d, 31, 22, 1.55);
         light.position.copy(bulb.position);
         lamp.add(light);
       }
@@ -2150,8 +2342,20 @@ class PrivateRoom {
       const tail = new THREE.Mesh(new THREE.PlaneGeometry(.36, .16), new THREE.MeshBasicMaterial({ color: 0xff2c24, toneMapped: false }));
       tail.rotation.y = -Math.PI / 2;
       tail.position.set(1.56, .06, 0);
-      car.add(body, cabin, tail);
-      chunk.add(car);
+      const headlight = new THREE.Mesh(new THREE.PlaneGeometry(.48, .16), new THREE.MeshBasicMaterial({ color: 0xe8f4ff, toneMapped: false }));
+      headlight.rotation.y = Math.PI / 2;
+      headlight.position.set(-1.56, .06, 0);
+      const wheelGeometry = new THREE.CylinderGeometry(.27, .27, .14, 10);
+      [-.92, .92].forEach((wheelX) => {
+        [-.72, .72].forEach((wheelZ) => {
+          const wheel = new THREE.Mesh(wheelGeometry, drainMaterial);
+          wheel.rotation.x = Math.PI / 2;
+          wheel.position.set(wheelX, -.24, wheelZ);
+          car.add(wheel);
+        });
+      });
+      car.add(body, cabin, tail, headlight);
+      detailGroup.add(car);
     }
 
     return chunk;
@@ -2179,6 +2383,11 @@ class PrivateRoom {
       while (chunk.position.x - this.freeCameraPosition.x < -halfSpan) chunk.position.x += span;
       while (chunk.position.z - this.freeCameraPosition.z > halfSpan) chunk.position.z -= span;
       while (chunk.position.z - this.freeCameraPosition.z < -halfSpan) chunk.position.z += span;
+      if (chunk.userData.details) {
+        const detailDx = chunk.position.x - this.freeCameraPosition.x;
+        const detailDz = chunk.position.z - this.freeCameraPosition.z;
+        chunk.userData.details.visible = detailDx * detailDx + detailDz * detailDz < 112 * 112;
+      }
     });
     if (this.cityStars) {
       this.cityStars.position.x = this.freeCameraPosition.x;
