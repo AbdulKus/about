@@ -1313,7 +1313,7 @@ class PrivateRoom {
           varying vec2 vUv;
           void main() {
             vec2 centered = vUv * 2.0 - 1.0;
-            float edge = smoothstep(1.0, .36, max(abs(centered.x), abs(centered.y)));
+            float edge = 1.0 - smoothstep(.36, 1.0, max(abs(centered.x), abs(centered.y)));
             vec3 white = mix(vec3(1.0, .985, .94), vec3(1.0), edge);
             gl_FragColor = vec4(white, 1.0);
           }
