@@ -2301,6 +2301,80 @@ class PrivateRoom {
     this.cityBioPavementColor = new THREE.Color(0x35171c);
     this.cityBaseLampColor = this.cityLampMaterial.color.clone();
     this.cityBioLampColor = new THREE.Color(0xff6a62);
+    const symbolAtlasCanvas = document.createElement("canvas");
+    symbolAtlasCanvas.width = symbolAtlasCanvas.height = 512;
+    const symbolAtlasContext = symbolAtlasCanvas.getContext("2d");
+    const strangeSymbols = [
+      "ꙮ", "⟁", "⌬", "⍜",
+      "ᛉ", "ᚼ", "Ѯ", "҂",
+      "∴", "⊘", "☿", "⛧",
+      "⟟", "⌁", "⧖", "※"
+    ];
+    symbolAtlasContext.clearRect(0, 0, 512, 512);
+    symbolAtlasContext.textAlign = "center";
+    symbolAtlasContext.textBaseline = "middle";
+    symbolAtlasContext.font = '700 78px "DejaVu Sans", "Segoe UI Symbol", serif';
+    strangeSymbols.forEach((symbol, index) => {
+      const column = index % 4;
+      const row = Math.floor(index / 4);
+      symbolAtlasContext.shadowColor = "rgba(255,255,255,.92)";
+      symbolAtlasContext.shadowBlur = 14;
+      symbolAtlasContext.fillStyle = "#fff";
+      symbolAtlasContext.fillText(symbol, column * 128 + 64, row * 128 + 66);
+      symbolAtlasContext.shadowBlur = 0;
+      symbolAtlasContext.strokeStyle = "rgba(255,255,255,.6)";
+      symbolAtlasContext.lineWidth = 1.5;
+      symbolAtlasContext.strokeText(symbol, column * 128 + 64, row * 128 + 66);
+    });
+    const symbolAtlasTexture = new THREE.CanvasTexture(symbolAtlasCanvas);
+    symbolAtlasTexture.colorSpace = THREE.SRGBColorSpace;
+    symbolAtlasTexture.anisotropy = maxAnisotropy;
+    this.citySymbolMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uAtlas: { value: symbolAtlasTexture },
+        uTime: { value: 0 },
+        uOpacity: { value: 0 }
+      },
+      vertexShader: `
+        attribute float aSymbol;
+        attribute vec3 aSymbolColor;
+        varying vec2 vSymbolUv;
+        varying vec3 vSymbolColor;
+        varying float vSymbolPhase;
+        void main() {
+          float column = mod(aSymbol, 4.0);
+          float row = floor(aSymbol / 4.0);
+          vSymbolUv = (uv + vec2(column, 3.0 - row)) * .25;
+          vSymbolColor = aSymbolColor;
+          vSymbolPhase = aSymbol * .731;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        uniform sampler2D uAtlas;
+        uniform float uTime;
+        uniform float uOpacity;
+        varying vec2 vSymbolUv;
+        varying vec3 vSymbolColor;
+        varying float vSymbolPhase;
+        void main() {
+          vec4 glyph = texture2D(uAtlas, vSymbolUv);
+          float pulse = .72 + sin(uTime * 2.25 + vSymbolPhase) * .18
+            + sin(uTime * .63 + vSymbolPhase * 2.1) * .1;
+          float alpha = glyph.a * uOpacity * clamp(pulse, .3, 1.15);
+          if (alpha < .025) discard;
+          gl_FragColor = vec4(vSymbolColor * (1.18 + pulse * .72), alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+      side: THREE.DoubleSide
+    });
+
     this.cityBioMatrixDummy = new THREE.Object3D();
     this.cityBioInstanceGeometries = {
       flesh: new THREE.SphereGeometry(1, 14, 10),
@@ -2365,6 +2439,7 @@ class PrivateRoom {
       chunk.userData.bioPulseMeshes.push(mesh);
       return mesh;
     };
+    const symbolEntries = [];
     const instanceSets = {
       flesh: { geometry: this.cityBioInstanceGeometries.flesh, material: this.cityFleshMaterial, entries: [] },
       membrane: { geometry: this.cityBioInstanceGeometries.membrane, material: this.cityMembraneMaterial, entries: [] },
@@ -2697,6 +2772,39 @@ class PrivateRoom {
           );
         }
 
+        const symbolCount = 2 + Math.floor(seeded(sideSeed + 605) * 4);
+        for (let glyphIndex = 0; glyphIndex < symbolCount; glyphIndex += 1) {
+          const glyphPoint = facadePoint(
+            side,
+            (seeded(sideSeed * 5 + glyphIndex + 606) - .5) * sideWidth * .72,
+            3.6 + seeded(sideSeed * 7 + glyphIndex + 607) * Math.max(4, baseHeight - 6.5),
+            .39
+          ).add(new THREE.Vector3(building.position.x, 0, building.position.z));
+          const hue = seeded(sideSeed * 11 + glyphIndex + 608);
+          const glyphColor = new THREE.Color().setHSL(
+            hue,
+            .82,
+            .58 + seeded(sideSeed + glyphIndex + 609) * .2
+          );
+          symbolEntries.push({
+            position: glyphPoint,
+            quaternion: rotation.clone(),
+            scale: new THREE.Vector3(
+              .72 + seeded(sideSeed + glyphIndex + 610) * 1.28,
+              .72 + seeded(sideSeed + glyphIndex + 611) * 1.28,
+              1
+            ),
+            threshold: Math.min(
+              .92,
+              .24 + glyphIndex * .075 + seeded(sideSeed + glyphIndex + 612) * .43
+            ),
+            pulseAmount: .09,
+            phase: seeded(sideSeed + glyphIndex + 613) * Math.PI * 2,
+            symbol: Math.floor(seeded(sideSeed + glyphIndex + 614) * 16),
+            color: glyphColor
+          });
+        }
+
         const mainVeinCurve = new THREE.CatmullRomCurve3([
           facadePoint(side, (seeded(sideSeed + 610) - .5) * sideWidth * .34, .25, .24),
           facadePoint(side, (seeded(sideSeed + 611) - .5) * sideWidth * .62, baseHeight * .22, .28),
@@ -2829,6 +2937,44 @@ class PrivateRoom {
         .82 + seeded(860 + apertureIndex) * .1,
         .07
       );
+    }
+
+    if (symbolEntries.length) {
+      symbolEntries.sort((a, b) => a.threshold - b.threshold);
+      const symbolGeometry = new THREE.PlaneGeometry(1, 1);
+      const symbolIndices = new Float32Array(symbolEntries.length);
+      const symbolColors = new Float32Array(symbolEntries.length * 3);
+      symbolEntries.forEach((entry, index) => {
+        symbolIndices[index] = entry.symbol;
+        symbolColors[index * 3] = entry.color.r;
+        symbolColors[index * 3 + 1] = entry.color.g;
+        symbolColors[index * 3 + 2] = entry.color.b;
+      });
+      symbolGeometry.setAttribute(
+        "aSymbol",
+        new THREE.InstancedBufferAttribute(symbolIndices, 1)
+      );
+      symbolGeometry.setAttribute(
+        "aSymbolColor",
+        new THREE.InstancedBufferAttribute(symbolColors, 3)
+      );
+      const symbolMesh = new THREE.InstancedMesh(
+        symbolGeometry,
+        this.citySymbolMaterial,
+        symbolEntries.length
+      );
+      symbolMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      symbolEntries.forEach((entry, index) => {
+        this.cityBioMatrixDummy.position.copy(entry.position);
+        this.cityBioMatrixDummy.quaternion.copy(entry.quaternion);
+        this.cityBioMatrixDummy.scale.copy(entry.scale).multiplyScalar(.0001);
+        this.cityBioMatrixDummy.updateMatrix();
+        symbolMesh.setMatrixAt(index, this.cityBioMatrixDummy.matrix);
+      });
+      symbolMesh.instanceMatrix.needsUpdate = true;
+      symbolMesh.frustumCulled = false;
+      bioGroup.add(symbolMesh);
+      chunk.userData.bioInstances.push({ mesh: symbolMesh, entries: symbolEntries });
     }
 
     Object.values(instanceSets).forEach((set) => {
@@ -3186,6 +3332,8 @@ class PrivateRoom {
     this.cityLivingWindowMaterial.opacity = membraneReveal * .94;
     this.cityLivingWindowMaterial.emissiveIntensity = .72 + heartbeat * 1.45;
     this.cityBoneMaterial.opacity = boneReveal * .86;
+    this.citySymbolMaterial.uniforms.uTime.value = this.elapsed;
+    this.citySymbolMaterial.uniforms.uOpacity.value = clamp((progress - .18) / .58, 0, 1);
 
     this.cityChunks.forEach((chunk) => {
       const bioGroup = chunk.userData.bioGroup;
