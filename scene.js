@@ -2301,6 +2301,14 @@ class PrivateRoom {
     this.cityBioPavementColor = new THREE.Color(0x35171c);
     this.cityBaseLampColor = this.cityLampMaterial.color.clone();
     this.cityBioLampColor = new THREE.Color(0xff6a62);
+    this.cityBioMatrixDummy = new THREE.Object3D();
+    this.cityBioInstanceGeometries = {
+      flesh: new THREE.SphereGeometry(1, 14, 10),
+      membrane: new THREE.SphereGeometry(1, 13, 9),
+      window: new THREE.SphereGeometry(.42, 12, 8),
+      rib: new THREE.TorusGeometry(1, .085, 6, 20, Math.PI),
+      spine: new THREE.ConeGeometry(.19, 1.8, 7)
+    };
 
     this.cityChunkSize = 64;
     this.cityChunkGrid = 5;
@@ -2313,6 +2321,20 @@ class PrivateRoom {
         this.cityChunks.push(chunk);
       }
     }
+
+    this.cityChunks.forEach((chunk) => {
+      if (chunk.userData.bioGroup) chunk.userData.bioGroup.visible = true;
+    });
+    this.renderer.compile(this.cityScene, this.camera);
+    this.cityChunks.forEach((chunk) => {
+      if (chunk.userData.bioGroup) chunk.userData.bioGroup.visible = false;
+      chunk.userData.bioPulseMeshes?.forEach((mesh) => {
+        mesh.visible = false;
+      });
+      chunk.userData.bioInstances?.forEach((batch) => {
+        batch.mesh.count = 0;
+      });
+    });
   }
 
   createCityChunk(gridX, gridZ) {
@@ -2325,6 +2347,8 @@ class PrivateRoom {
     bioGroup.visible = false;
     chunk.userData.bioGroup = bioGroup;
     chunk.userData.bioPulseMeshes = [];
+    chunk.userData.bioInstances = [];
+    chunk.userData.bioBuildings = [];
     chunk.add(bioGroup);
     const size = this.cityChunkSize;
     const seed = Math.abs(Math.sin(gridX * 127.13 + gridZ * 311.71)) + .013;
@@ -2341,6 +2365,23 @@ class PrivateRoom {
       chunk.userData.bioPulseMeshes.push(mesh);
       return mesh;
     };
+    const instanceSets = {
+      flesh: { geometry: this.cityBioInstanceGeometries.flesh, material: this.cityFleshMaterial, entries: [] },
+      membrane: { geometry: this.cityBioInstanceGeometries.membrane, material: this.cityMembraneMaterial, entries: [] },
+      window: { geometry: this.cityBioInstanceGeometries.window, material: this.cityLivingWindowMaterial, entries: [] },
+      rib: { geometry: this.cityBioInstanceGeometries.rib, material: this.cityBoneMaterial, entries: [] },
+      spine: { geometry: this.cityBioInstanceGeometries.spine, material: this.cityBoneMaterial, entries: [] }
+    };
+    const addBioInstance = (kind, position, quaternion, scale, threshold, pulseAmount) => {
+      instanceSets[kind].entries.push({
+        position,
+        quaternion,
+        scale,
+        threshold,
+        pulseAmount,
+        phase: seeded(threshold * 991 + instanceSets[kind].entries.length * 17.3) * Math.PI * 2
+      });
+    };
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(size + .2, size + .2), this.cityAsphaltMaterial);
     ground.rotation.x = -Math.PI / 2;
@@ -2354,7 +2395,7 @@ class PrivateRoom {
     );
     bioGround.rotation.x = -Math.PI / 2;
     bioGround.position.y = .028;
-    registerBioMesh(bioGround, .04, .008);
+    registerBioMesh(bioGround, .018 + seeded(405) * .055, .008);
 
     for (let groundVeinIndex = 0; groundVeinIndex < 5; groundVeinIndex += 1) {
       const horizontal = groundVeinIndex % 2 === 0;
@@ -2370,7 +2411,11 @@ class PrivateRoom {
         new THREE.TubeGeometry(groundCurve, 28, groundVeinIndex % 3 === 0 ? .115 : .055, 6, false),
         groundVeinIndex % 3 === 0 ? this.cityVeinMaterial : this.cityCapillaryMaterial
       );
-      registerBioMesh(groundVein, groundVeinIndex % 3 === 0 ? .18 : .3, .018);
+      registerBioMesh(
+        groundVein,
+        (groundVeinIndex % 3 === 0 ? .11 : .22) + seeded(435 + groundVeinIndex) * .2,
+        .018
+      );
     }
 
     for (let ribIndex = 0; ribIndex < 3; ribIndex += 1) {
@@ -2380,7 +2425,7 @@ class PrivateRoom {
       );
       rib.position.set(0, .22, -20 + ribIndex * 20);
       rib.rotation.y = ribIndex % 2 ? .08 : -.08;
-      registerBioMesh(rib, .7 + ribIndex * .035, .026);
+      registerBioMesh(rib, .62 + ribIndex * .055 + seeded(470 + ribIndex) * .13, .026);
     }
 
     const sidewalkSize = 25;
@@ -2403,6 +2448,16 @@ class PrivateRoom {
       building.castShadow = true;
       building.receiveShadow = true;
       chunk.add(building);
+      chunk.userData.bioBuildings.push({
+        mesh: building,
+        baseScale: building.scale.clone(),
+        baseY: building.position.y,
+        baseRotationY: building.rotation.y,
+        height: baseHeight,
+        width,
+        depth,
+        phase: seeded(plotIndex + 305) * Math.PI * 2
+      });
       chunk.userData.colliders.push({
         x: building.position.x,
         z: building.position.z,
@@ -2564,84 +2619,283 @@ class PrivateRoom {
       doorLamp.position.set(serviceDoor.position.x, 2.55, serviceDoor.position.z + .08);
       detailGroup.add(doorLamp);
 
-      const facadeZ = depth * .527;
-      const fleshBase = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 18, 12),
+      const facadePoint = (side, u, y, offset = .12) => {
+        if (side === 0) return new THREE.Vector3(u, y, depth * .5 + offset);
+        if (side === 1) return new THREE.Vector3(-u, y, -depth * .5 - offset);
+        if (side === 2) return new THREE.Vector3(width * .5 + offset, y, -u);
+        return new THREE.Vector3(-width * .5 - offset, y, u);
+      };
+      const facadeQuaternion = (side) => new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        [0, Math.PI, Math.PI * .5, -Math.PI * .5][side]
+      );
+      const facadeScale = (side, across, vertical, depthScale) => (
+        new THREE.Vector3(across, vertical, depthScale)
+      );
+
+      for (let side = 0; side < 4; side += 1) {
+        const sideWidth = side < 2 ? width : depth;
+        const sideDepth = side < 2 ? depth : width;
+        const sideSeed = plotIndex * 41 + side * 13;
+        const rotation = facadeQuaternion(side);
+        const faceCenter = facadePoint(side, 0, 0, .08).add(
+          new THREE.Vector3(building.position.x, 0, building.position.z)
+        );
+
+        addBioInstance(
+          "flesh",
+          new THREE.Vector3(faceCenter.x, 1.05 + seeded(sideSeed + 500) * .55, faceCenter.z),
+          rotation,
+          facadeScale(side, sideWidth * (.31 + seeded(sideSeed + 501) * .13), 1.15 + seeded(sideSeed + 502) * 1.7, .5 + seeded(sideSeed + 503) * .52),
+          .28 + seeded(sideSeed + 504) * .19,
+          .052
+        );
+
+        const membraneCount = 2 + Math.floor(seeded(sideSeed + 505) * 2);
+        for (let membraneIndex = 0; membraneIndex < membraneCount; membraneIndex += 1) {
+          const point = facadePoint(
+            side,
+            (seeded(sideSeed + membraneIndex + 510) - .5) * sideWidth * .62,
+            4.2 + membraneIndex * Math.min(6.2, baseHeight * .21),
+            .17
+          ).add(new THREE.Vector3(building.position.x, 0, building.position.z));
+          addBioInstance(
+            "membrane",
+            point,
+            rotation,
+            facadeScale(
+              side,
+              1.1 + seeded(sideSeed + membraneIndex + 520) * 2.35,
+              .7 + seeded(sideSeed + membraneIndex + 530) * 2.15,
+              .2 + seeded(sideSeed + membraneIndex + 540) * .12
+            ),
+            .18 + side * .025 + membraneIndex * .055 + seeded(sideSeed + 541) * .08,
+            .07
+          );
+        }
+
+        const livingWindowCount = 4 + Math.floor(seeded(sideSeed + 550) * 4);
+        for (let livingIndex = 0; livingIndex < livingWindowCount; livingIndex += 1) {
+          const point = facadePoint(
+            side,
+            (seeded(sideSeed * 2 + livingIndex + 560) - .5) * sideWidth * .7,
+            3.9 + seeded(sideSeed * 3 + livingIndex + 570) * Math.max(4, baseHeight - 7),
+            .24
+          ).add(new THREE.Vector3(building.position.x, 0, building.position.z));
+          addBioInstance(
+            "window",
+            point,
+            rotation,
+            facadeScale(
+              side,
+              1.1 + seeded(sideSeed + livingIndex + 580) * 1.15,
+              .52 + seeded(sideSeed + livingIndex + 590) * .68,
+              .3
+            ),
+            .13 + seeded(sideSeed + livingIndex + 600) * .24,
+            .095
+          );
+        }
+
+        const mainVeinCurve = new THREE.CatmullRomCurve3([
+          facadePoint(side, (seeded(sideSeed + 610) - .5) * sideWidth * .34, .25, .24),
+          facadePoint(side, (seeded(sideSeed + 611) - .5) * sideWidth * .62, baseHeight * .22, .28),
+          facadePoint(side, (seeded(sideSeed + 612) - .5) * sideWidth * .7, baseHeight * .48, .3),
+          facadePoint(side, (seeded(sideSeed + 613) - .5) * sideWidth * .54, baseHeight * .74, .27),
+          facadePoint(side, (seeded(sideSeed + 614) - .5) * sideWidth * .38, baseHeight * .97, .23)
+        ]);
+        const mainVein = new THREE.Mesh(
+          new THREE.TubeGeometry(mainVeinCurve, 30, .085 + seeded(sideSeed + 615) * .075, 7, false),
+          this.cityVeinMaterial
+        );
+        mainVein.position.set(building.position.x, 0, building.position.z);
+        registerBioMesh(mainVein, .09 + side * .018 + seeded(sideSeed + 616) * .11, .022);
+
+        const capillaryPositions = [];
+        for (let branch = 0; branch < 4; branch += 1) {
+          const branchCurve = new THREE.CatmullRomCurve3([
+            facadePoint(side, (seeded(sideSeed + branch + 620) - .5) * sideWidth * .28, baseHeight * (.12 + branch * .17), .31),
+            facadePoint(side, (seeded(sideSeed + branch + 630) - .5) * sideWidth * .66, baseHeight * (.2 + branch * .16), .32),
+            facadePoint(side, (seeded(sideSeed + branch + 640) - .5) * sideWidth * .78, baseHeight * (.28 + branch * .14), .31)
+          ]);
+          const points = branchCurve.getPoints(9);
+          for (let pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+            capillaryPositions.push(...points[pointIndex - 1].toArray(), ...points[pointIndex].toArray());
+          }
+        }
+        const capillaryGeometry = new THREE.BufferGeometry();
+        capillaryGeometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(capillaryPositions, 3)
+        );
+        const capillaries = new THREE.LineSegments(capillaryGeometry, this.cityCapillaryMaterial);
+        capillaries.position.set(building.position.x, 0, building.position.z);
+        registerBioMesh(capillaries, .2 + side * .02 + seeded(sideSeed + 650) * .12, .009);
+
+        if (baseHeight > 17) {
+          addBioInstance(
+            "rib",
+            facadePoint(side, 0, baseHeight * (.48 + seeded(sideSeed + 660) * .22), .3)
+              .add(new THREE.Vector3(building.position.x, 0, building.position.z)),
+            rotation,
+            facadeScale(side, Math.min(sideWidth * .28, 3.8), Math.min(sideWidth * .28, 3.8), 1),
+            .46 + side * .025 + seeded(sideSeed + 661) * .15,
+            .028
+          );
+        }
+      }
+
+      const tendrilCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, baseHeight * .94, 0),
+        new THREE.Vector3((seeded(plotIndex + 680) - .5) * 3, baseHeight + 4, (seeded(plotIndex + 681) - .5) * 3),
+        new THREE.Vector3((seeded(plotIndex + 682) - .5) * 7, baseHeight + 9, (seeded(plotIndex + 683) - .5) * 7),
+        new THREE.Vector3((seeded(plotIndex + 684) - .5) * 12, baseHeight + 15, (seeded(plotIndex + 685) - .5) * 12)
+      ]);
+      const tendril = new THREE.Mesh(
+        new THREE.TubeGeometry(tendrilCurve, 26, .18 + seeded(plotIndex + 686) * .16, 7, false),
         this.cityFleshMaterial
       );
-      fleshBase.position.set(building.position.x, 1.1, building.position.z + facadeZ);
-      fleshBase.scale.set(width * .42, 1.25 + seeded(plotIndex + 320) * 1.4, .55 + seeded(plotIndex + 321) * .5);
-      registerBioMesh(fleshBase, .4 + seeded(plotIndex + 322) * .12, .055);
+      tendril.position.set(building.position.x, 0, building.position.z);
+      registerBioMesh(tendril, .55 + seeded(plotIndex + 687) * .18, .045);
 
-      for (let membraneIndex = 0; membraneIndex < 3; membraneIndex += 1) {
-        const membrane = new THREE.Mesh(
-          new THREE.SphereGeometry(1, 16, 10),
-          this.cityMembraneMaterial
-        );
-        membrane.position.set(
-          building.position.x + (seeded(plotIndex * 11 + membraneIndex + 330) - .5) * width * .58,
-          4.2 + membraneIndex * Math.min(5.5, baseHeight * .2),
-          building.position.z + facadeZ + .05
-        );
-        membrane.scale.set(
-          1.1 + seeded(membraneIndex + plotIndex * 3 + 340) * 2.1,
-          .7 + seeded(membraneIndex + plotIndex * 5 + 350) * 1.8,
-          .22
-        );
-        registerBioMesh(membrane, .28 + membraneIndex * .07, .065);
-      }
+      addBioInstance(
+        "flesh",
+        new THREE.Vector3(
+          building.position.x + (seeded(plotIndex + 688) - .5) * width * .22,
+          baseHeight + 1.25 + seeded(plotIndex + 689) * 2.2,
+          building.position.z + (seeded(plotIndex + 690) - .5) * depth * .22
+        ),
+        new THREE.Quaternion(),
+        new THREE.Vector3(
+          2.2 + seeded(plotIndex + 691) * 3.4,
+          1.35 + seeded(plotIndex + 692) * 2.8,
+          2.1 + seeded(plotIndex + 693) * 3.2
+        ),
+        .67 + seeded(plotIndex + 694) * .15,
+        .085
+      );
+      addBioInstance(
+        "membrane",
+        new THREE.Vector3(
+          building.position.x + (seeded(plotIndex + 695) - .5) * width * .18,
+          baseHeight + 2 + seeded(plotIndex + 696) * 2.5,
+          building.position.z + (seeded(plotIndex + 697) - .5) * depth * .18
+        ),
+        new THREE.Quaternion(),
+        new THREE.Vector3(
+          1.3 + seeded(plotIndex + 698) * 2,
+          1.7 + seeded(plotIndex + 699) * 2.4,
+          1.3 + seeded(plotIndex + 700) * 2
+        ),
+        .74 + seeded(plotIndex + 701) * .12,
+        .11
+      );
 
-      for (let veinIndex = 0; veinIndex < 3; veinIndex += 1) {
-        const veinCurve = new THREE.CatmullRomCurve3([
-          new THREE.Vector3((veinIndex - 1) * width * .2, .4, facadeZ + .12),
-          new THREE.Vector3((seeded(plotIndex + veinIndex + 360) - .5) * width * .48, baseHeight * .23, facadeZ + .15),
-          new THREE.Vector3((seeded(plotIndex + veinIndex + 370) - .5) * width * .55, baseHeight * .51, facadeZ + .16),
-          new THREE.Vector3((seeded(plotIndex + veinIndex + 380) - .5) * width * .42, baseHeight * .78, facadeZ + .14),
-          new THREE.Vector3((veinIndex - 1) * width * .17, baseHeight * .96, facadeZ + .12)
-        ]);
-        const vein = new THREE.Mesh(
-          new THREE.TubeGeometry(
-            veinCurve,
-            30,
-            veinIndex === 1 ? .12 : .052,
-            veinIndex === 1 ? 7 : 5,
-            false
+      for (let spineIndex = 0; spineIndex < 5; spineIndex += 1) {
+        addBioInstance(
+          "spine",
+          new THREE.Vector3(
+            building.position.x + (spineIndex - 2) * Math.min(1.6, width * .12),
+            baseHeight + .85 + seeded(plotIndex + spineIndex + 690) * 1.2,
+            building.position.z + (seeded(plotIndex + spineIndex + 700) - .5) * depth * .5
           ),
-          veinIndex === 1 ? this.cityVeinMaterial : this.cityCapillaryMaterial
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(
+            (seeded(plotIndex + spineIndex + 710) - .5) * .25,
+            seeded(plotIndex + spineIndex + 720) * Math.PI,
+            (seeded(plotIndex + spineIndex + 730) - .5) * .28
+          )),
+          new THREE.Vector3(1, .8 + seeded(plotIndex + spineIndex + 740) * 1.3, 1),
+          .62 + seeded(plotIndex + spineIndex + 750) * .16,
+          .025
         );
-        vein.position.set(building.position.x, 0, building.position.z);
-        registerBioMesh(vein, veinIndex === 1 ? .16 : .3 + veinIndex * .035, veinIndex === 1 ? .025 : .012);
-      }
-
-      const livingWindowCount = 4 + Math.floor(seeded(plotIndex + 390) * 3);
-      for (let livingIndex = 0; livingIndex < livingWindowCount; livingIndex += 1) {
-        const livingWindow = new THREE.Mesh(
-          new THREE.SphereGeometry(.42, 14, 9),
-          this.cityLivingWindowMaterial
-        );
-        livingWindow.position.set(
-          building.position.x + (seeded(plotIndex * 17 + livingIndex + 400) - .5) * width * .62,
-          4.1 + seeded(plotIndex * 23 + livingIndex + 410) * Math.max(4, baseHeight - 7),
-          building.position.z + facadeZ + .19
-        );
-        livingWindow.scale.set(
-          1.15 + seeded(livingIndex + 420) * .85,
-          .55 + seeded(livingIndex + 430) * .5,
-          .28
-        );
-        registerBioMesh(livingWindow, .22 + seeded(livingIndex + plotIndex + 440) * .16, .09);
-      }
-
-      if (baseHeight > 22) {
-        const facadeRib = new THREE.Mesh(
-          new THREE.TorusGeometry(Math.min(width * .27, 3.2), .11, 7, 24, Math.PI),
-          this.cityBoneMaterial
-        );
-        facadeRib.position.set(building.position.x, baseHeight * .58, building.position.z + facadeZ + .12);
-        facadeRib.rotation.z = seeded(plotIndex + 450) > .5 ? .16 : -.16;
-        registerBioMesh(facadeRib, .58 + seeded(plotIndex + 451) * .12, .028);
       }
     });
+
+    for (let apertureIndex = 0; apertureIndex < 3; apertureIndex += 1) {
+      const apertureRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI * .5, 0, 0));
+      addBioInstance(
+        "rib",
+        new THREE.Vector3(
+          -18 + apertureIndex * 18,
+          .14,
+          (apertureIndex % 2 ? 2.6 : -2.6)
+        ),
+        apertureRotation,
+        new THREE.Vector3(
+          1.4 + seeded(850 + apertureIndex) * 1.8,
+          1.4 + seeded(850 + apertureIndex) * 1.8,
+          1
+        ),
+        .82 + seeded(860 + apertureIndex) * .1,
+        .07
+      );
+    }
+
+    Object.values(instanceSets).forEach((set) => {
+      if (!set.entries.length) return;
+      set.entries.sort((a, b) => a.threshold - b.threshold);
+      const mesh = new THREE.InstancedMesh(set.geometry, set.material, set.entries.length);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      set.entries.forEach((entry, index) => {
+        this.cityBioMatrixDummy.position.copy(entry.position);
+        this.cityBioMatrixDummy.quaternion.copy(entry.quaternion);
+        this.cityBioMatrixDummy.scale.copy(entry.scale).multiplyScalar(.0001);
+        this.cityBioMatrixDummy.updateMatrix();
+        mesh.setMatrixAt(index, this.cityBioMatrixDummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.frustumCulled = false;
+      bioGroup.add(mesh);
+      chunk.userData.bioInstances.push({ mesh, entries: set.entries });
+    });
+
+    const arteryPairs = [[0, 3], [1, 2]];
+    arteryPairs.forEach(([fromIndex, toIndex], arteryIndex) => {
+      const from = chunk.userData.bioBuildings[fromIndex];
+      const to = chunk.userData.bioBuildings[toIndex];
+      if (!from || !to) return;
+      const arteryHeight = 9 + seeded(780 + arteryIndex) * 10;
+      const arteryCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(from.mesh.position.x, arteryHeight - 1.5, from.mesh.position.z),
+        new THREE.Vector3(
+          lerp(from.mesh.position.x, to.mesh.position.x, .3),
+          arteryHeight + 2.8 + seeded(781 + arteryIndex) * 3,
+          lerp(from.mesh.position.z, to.mesh.position.z, .3)
+        ),
+        new THREE.Vector3(
+          lerp(from.mesh.position.x, to.mesh.position.x, .68),
+          arteryHeight + 1.4 + seeded(783 + arteryIndex) * 4,
+          lerp(from.mesh.position.z, to.mesh.position.z, .68)
+        ),
+        new THREE.Vector3(to.mesh.position.x, arteryHeight, to.mesh.position.z)
+      ]);
+      const artery = new THREE.Mesh(
+        new THREE.TubeGeometry(arteryCurve, 34, .2 + seeded(785 + arteryIndex) * .18, 8, false),
+        this.cityFleshMaterial
+      );
+      registerBioMesh(artery, .72 + seeded(786 + arteryIndex) * .13, .052);
+
+      const hangingPositions = [];
+      const arteryPoints = arteryCurve.getPoints(8);
+      arteryPoints.slice(1, -1).forEach((point, filamentIndex) => {
+        const length = 1.2 + seeded(800 + arteryIndex * 10 + filamentIndex) * 5.4;
+        hangingPositions.push(
+          point.x, point.y, point.z,
+          point.x + (seeded(820 + filamentIndex) - .5) * .7,
+          Math.max(2.5, point.y - length),
+          point.z + (seeded(830 + filamentIndex) - .5) * .7
+        );
+      });
+      const hangingGeometry = new THREE.BufferGeometry();
+      hangingGeometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(hangingPositions, 3)
+      );
+      const hangingTissue = new THREE.LineSegments(hangingGeometry, this.cityCapillaryMaterial);
+      registerBioMesh(hangingTissue, .78 + seeded(840 + arteryIndex) * .1, .018);
+    });
+
+
 
     const drainMaterial = new THREE.MeshStandardMaterial({ color: 0x090c0f, roughness: .54, metalness: .76 });
     for (let detailIndex = 0; detailIndex < 3; detailIndex += 1) {
@@ -2850,12 +3104,11 @@ class PrivateRoom {
   }
 
   updateCityBiomech(delta) {
-    const startDistance = 112;
-    const morphDistance = 245;
-    const rawProgress = clamp((this.cityTravelDistance - startDistance) / morphDistance, 0, 1);
-    const easedTarget = rawProgress * rawProgress * (3 - 2 * rawProgress);
-    this.cityBiomechTarget = easedTarget;
-    this.cityBiomechProgress = damp(this.cityBiomechProgress, easedTarget, 1.35, delta);
+    const startDistance = 100;
+    const mutationDistance = Math.max(0, this.cityTravelDistance - startDistance);
+    const endlessProgress = 1 - Math.exp(-mutationDistance / 650);
+    this.cityBiomechTarget = endlessProgress;
+    this.cityBiomechProgress = damp(this.cityBiomechProgress, endlessProgress, .82, delta);
     const progress = this.cityBiomechProgress;
     const heartbeat = .5 + .5 * Math.sin(this.elapsed * 1.72);
     const deepPulse = .5 + .5 * Math.sin(this.elapsed * .83 + 1.4);
@@ -2901,7 +3154,7 @@ class PrivateRoom {
       );
       material.roughness = lerp(.78, .47 + deepPulse * .06, progress);
       material.metalness = lerp(.14, .025, progress);
-      material.bumpScale = progress * (.13 + heartbeat * .055);
+      material.bumpScale = progress * (.23 + heartbeat * .11);
     });
 
     this.cityAsphaltMaterial.color.lerpColors(
@@ -2909,7 +3162,7 @@ class PrivateRoom {
       this.cityBioAsphaltColor,
       progress
     );
-    this.cityAsphaltMaterial.bumpScale = lerp(.19, .42 + heartbeat * .07, progress);
+    this.cityAsphaltMaterial.bumpScale = lerp(.19, .55 + heartbeat * .11, progress);
     this.cityAsphaltMaterial.roughness = lerp(.78, .5 + deepPulse * .07, progress);
     this.cityPavementMaterial.color.lerpColors(
       this.cityPavementMaterial.userData.cityBaseColor,
@@ -2958,6 +3211,43 @@ class PrivateRoom {
           base.y * reveal * softVerticalPulse,
           base.z * reveal * pulse
         );
+      });
+
+      chunk.userData.bioInstances.forEach((batch) => {
+        let visibleCount = 0;
+        for (let index = 0; index < batch.entries.length; index += 1) {
+          const entry = batch.entries[index];
+          const revealRaw = clamp((progress - entry.threshold) / .19, 0, 1);
+          if (revealRaw <= .001) break;
+          const reveal = revealRaw * revealRaw * (3 - 2 * revealRaw);
+          const pulse = 1 + Math.sin(this.elapsed * 1.72 + entry.phase)
+            * entry.pulseAmount * progress * reveal;
+          this.cityBioMatrixDummy.position.copy(entry.position);
+          this.cityBioMatrixDummy.quaternion.copy(entry.quaternion);
+          this.cityBioMatrixDummy.scale.set(
+            entry.scale.x * reveal * pulse,
+            entry.scale.y * reveal * (1 + (pulse - 1) * .46),
+            entry.scale.z * reveal * pulse
+          );
+          this.cityBioMatrixDummy.updateMatrix();
+          batch.mesh.setMatrixAt(visibleCount, this.cityBioMatrixDummy.matrix);
+          visibleCount += 1;
+        }
+        batch.mesh.count = visibleCount;
+        if (visibleCount > 0) batch.mesh.instanceMatrix.needsUpdate = true;
+      });
+
+      const architectureReveal = clamp((progress - .18) / .72, 0, 1);
+      chunk.userData.bioBuildings.forEach((record) => {
+        const breath = Math.sin(this.elapsed * .84 + record.phase);
+        const twitch = Math.sin(this.elapsed * 1.73 + record.phase * 1.7);
+        record.mesh.scale.set(
+          record.baseScale.x * (1 + breath * .018 * architectureReveal),
+          record.baseScale.y * (1 + twitch * .009 * architectureReveal),
+          record.baseScale.z * (1 - breath * .016 * architectureReveal)
+        );
+        record.mesh.position.y = record.baseY + breath * .055 * architectureReveal;
+        record.mesh.rotation.y = record.baseRotationY + twitch * .005 * architectureReveal;
       });
     });
   }
