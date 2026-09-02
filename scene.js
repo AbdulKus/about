@@ -47,10 +47,13 @@ class PrivateRoom {
     this.liminalFall = false;
     this.liminalFallTime = 0;
     this.liminalStairStartX = -139.5;
-    this.liminalStairEndX = -160.05;
-    this.liminalStairExitX = -160.05;
-    this.liminalStairRise = 9.2;
-    this.liminalStairSteps = 24;
+    this.liminalStairEndX = -176.0;
+    this.liminalStairExitX = -184.2;
+    this.liminalStairRise = 15.5;
+    this.liminalStairSteps = 40;
+    this.liminalWhiteRoomNearX = -169.8;
+    this.liminalWhiteRoomFarX = -190.0;
+    this.liminalWhiteRoomHalfWidth = 5.8;
     this.skyBaseY = 0;
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
@@ -59,6 +62,11 @@ class PrivateRoom {
     this.skyTransitionDuration = 3.25;
     this.skyGlare = 0;
     this.skyCloudTime = 0;
+    this.audioContext = null;
+    this.audioMaster = null;
+    this.audioCorridorDistortion = 0;
+    this.lastFootstepIndex = -1;
+    this.footstepBuffer = null;
     this.shouldRestoreContacts = sessionStorage.getItem("about-return-to-contacts") === "1";
     this.transitionBlackout = document.querySelector("#transitionBlackout");
     this.glitch = 0;
@@ -1173,12 +1181,6 @@ class PrivateRoom {
       emissive: 0x29170a,
       emissiveIntensity: .16
     });
-    const wallMaterial = new THREE.MeshStandardMaterial({
-      color: 0x18090c,
-      roughness: .91,
-      metalness: .02
-    });
-
     for (let index = 0; index < stepCount; index += 1) {
       const topY = (index + 1) * stepRise;
       const step = new THREE.Mesh(
@@ -1197,27 +1199,6 @@ class PrivateRoom {
       lip.position.set(startX - stepDepth * (index + 1) + .03, topY + .02, centerZ);
       exit.add(lip);
     }
-
-    const landingLength = endX - exitX + .28;
-    const landing = new THREE.Mesh(
-      new THREE.BoxGeometry(landingLength, .18, 2.72),
-      stepMaterial
-    );
-    landing.position.set((endX + exitX) * .5, this.liminalStairRise - .09, centerZ);
-    landing.castShadow = true;
-    landing.receiveShadow = true;
-    exit.add(landing);
-
-    const stairShellLength = startX - exitX + .6;
-    [-1.58, 1.58].forEach((zOffset) => {
-      const wall = new THREE.Mesh(
-        new THREE.BoxGeometry(stairShellLength, this.liminalStairRise + 4.4, .16),
-        wallMaterial
-      );
-      wall.position.set((startX + exitX) * .5, (this.liminalStairRise + 4.4) * .5, centerZ + zOffset);
-      wall.receiveShadow = true;
-      exit.add(wall);
-    });
 
     const makeRail = (a, b, radius = .045) => {
       const direction = b.clone().sub(a);
@@ -1263,74 +1244,112 @@ class PrivateRoom {
       );
     });
 
-    // A lidless ceiling hatch marks the exit. Its opening is deliberately
-    // filled with featureless white light; the white space beyond becomes the
-    // exposure bridge into the sky only after the final stair is reached.
-    const hatchY = this.liminalStairRise + 3.56;
-    const hatchWidth = 5.75;
-    const hatchDepth = 3.8;
-    const hatchX = exitX + hatchWidth * .5 - .18;
-    const hatch = new THREE.Group();
-    hatch.position.set(hatchX, hatchY, centerZ);
-    exit.add(hatch);
-    this.liminalHatchGroup = hatch;
+    // The staircase passes through a real opening cut out of the floor of a
+    // separate room. There is no portal plane: every visible white surface is
+    // physical geometry above the stairwell.
+    const floorY = this.liminalStairRise;
+    const roomNearX = this.liminalWhiteRoomNearX;
+    const roomFarX = this.liminalWhiteRoomFarX;
+    const roomHalfWidth = this.liminalWhiteRoomHalfWidth;
+    const roomLength = roomNearX - roomFarX;
+    const roomCenterX = (roomNearX + roomFarX) * .5;
+    const roomHeight = 7.6;
+    const hatchNearX = roomNearX - .18;
+    const hatchFarX = endX + .02;
+    const hatchLength = hatchNearX - hatchFarX;
+    const hatchCenterX = (hatchNearX + hatchFarX) * .5;
+    const hatchHalfWidth = 1.72;
 
-    const hatchFrameMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd9d4c8,
-      roughness: .32,
-      metalness: .58,
+    const whiteRoom = new THREE.Group();
+    whiteRoom.name = "physicalWhiteRoom";
+    exit.add(whiteRoom);
+    this.liminalWhiteRoom = whiteRoom;
+
+    const whiteMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: .78,
+      metalness: 0,
       emissive: 0xffffff,
-      emissiveIntensity: .34
+      emissiveIntensity: .32
     });
-    [
-      [hatchWidth, .12, .16, 0, -hatchDepth * .5],
-      [hatchWidth, .12, .16, 0, hatchDepth * .5],
-      [.16, .12, hatchDepth, -hatchWidth * .5, 0],
-      [.16, .12, hatchDepth, hatchWidth * .5, 0]
-    ].forEach(([width, height, depth, x, z]) => {
-      const framePart = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, depth),
-        hatchFrameMaterial
-      );
-      framePart.position.set(x, 0, z);
-      hatch.add(framePart);
+    const pearlMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfffcf2,
+      roughness: .36,
+      metalness: .08,
+      emissive: 0xfff8e8,
+      emissiveIntensity: .44
     });
 
-    const whiteOpening = new THREE.Mesh(
-      new THREE.PlaneGeometry(hatchWidth - .28, hatchDepth - .28),
-      new THREE.ShaderMaterial({
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        toneMapped: false,
-        vertexShader: `
-          varying vec2 vUv;
-          void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: `
-          varying vec2 vUv;
-          void main() {
-            vec2 centered = vUv * 2.0 - 1.0;
-            float edge = 1.0 - smoothstep(.36, 1.0, max(abs(centered.x), abs(centered.y)));
-            vec3 white = mix(vec3(1.0, .985, .94), vec3(1.0), edge);
-            gl_FragColor = vec4(white, 1.0);
-          }
-        `
-      })
+    const addBox = (width, height, depth, x, y, z, material = whiteMaterial) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+      mesh.position.set(x, y, z);
+      mesh.receiveShadow = true;
+      whiteRoom.add(mesh);
+      return mesh;
+    };
+
+    // Main floor beyond the opening.
+    const farFloorLength = hatchFarX - roomFarX;
+    addBox(
+      farFloorLength,
+      .18,
+      roomHalfWidth * 2,
+      roomFarX + farFloorLength * .5,
+      floorY - .09,
+      centerZ
     );
-    whiteOpening.rotation.x = -Math.PI / 2;
-    whiteOpening.position.y = .025;
-    whiteOpening.renderOrder = 4;
-    hatch.add(whiteOpening);
 
-    const coolGlow = new THREE.PointLight(0xffffff, 118, 36, 1.18);
-    coolGlow.position.set(hatchX, hatchY - 1.45, centerZ);
-    exit.add(coolGlow);
-    const upperGlow = new THREE.PointLight(0xfff6df, 74, 28, 1.3);
-    upperGlow.position.set(hatchX + .35, hatchY + 1.8, centerZ);
-    exit.add(upperGlow);
+    // Narrow floor cap in front of the opening.
+    const nearFloorLength = roomNearX - hatchNearX;
+    addBox(
+      nearFloorLength,
+      .18,
+      roomHalfWidth * 2,
+      hatchNearX + nearFloorLength * .5,
+      floorY - .09,
+      centerZ
+    );
+
+    // Side floor slabs leave the stairwell genuinely open.
+    const sideFloorWidth = roomHalfWidth - hatchHalfWidth;
+    [-1, 1].forEach((side) => {
+      addBox(
+        hatchLength,
+        .18,
+        sideFloorWidth,
+        hatchCenterX,
+        floorY - .09,
+        centerZ + side * (hatchHalfWidth + sideFloorWidth * .5)
+      );
+    });
+
+    // Walls and ceiling enclose a distinct upper room.
+    addBox(roomLength, roomHeight, .18, roomCenterX, floorY + roomHeight * .5, centerZ - roomHalfWidth);
+    addBox(roomLength, roomHeight, .18, roomCenterX, floorY + roomHeight * .5, centerZ + roomHalfWidth);
+    addBox(.18, roomHeight, roomHalfWidth * 2, roomFarX, floorY + roomHeight * .5, centerZ);
+    addBox(.18, roomHeight, roomHalfWidth * 2, roomNearX, floorY + roomHeight * .5, centerZ);
+    addBox(roomLength, .18, roomHalfWidth * 2, roomCenterX, floorY + roomHeight, centerZ);
+
+    // A thin frame follows the four real edges of the hole; nothing fills it.
+    addBox(hatchLength, .09, .14, hatchCenterX, floorY + .045, centerZ - hatchHalfWidth, pearlMaterial);
+    addBox(hatchLength, .09, .14, hatchCenterX, floorY + .045, centerZ + hatchHalfWidth, pearlMaterial);
+    addBox(.14, .09, hatchHalfWidth * 2, hatchNearX, floorY + .045, centerZ, pearlMaterial);
+    addBox(.14, .09, hatchHalfWidth * 2, hatchFarX, floorY + .045, centerZ, pearlMaterial);
+
+    const roomLightPositions = [
+      [roomNearX - 3.0, centerZ - 2.7, 138],
+      [roomCenterX, centerZ + 2.5, 156],
+      [roomFarX + 3.0, centerZ - 1.1, 128]
+    ];
+    roomLightPositions.forEach(([x, z, intensity]) => {
+      const light = new THREE.PointLight(0xfff9e9, intensity, 25, 1.35);
+      light.position.set(x, floorY + roomHeight - 1.0, z);
+      whiteRoom.add(light);
+    });
+
+    const hatchGlow = new THREE.PointLight(0xffffff, 112, 30, 1.22);
+    hatchGlow.position.set(hatchCenterX, floorY + 2.4, centerZ);
+    whiteRoom.add(hatchGlow);
     const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
     warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
     exit.add(warmGlow);
@@ -1338,6 +1357,12 @@ class PrivateRoom {
 
   getLiminalStairHeight(x, z) {
     if (!this.liminalEntered || this.skyMode || !this.liminalCenterZ) return 0;
+
+    const inWhiteRoom = x <= this.liminalStairEndX
+      && x >= this.liminalWhiteRoomFarX
+      && Math.abs(z - this.liminalCenterZ) <= this.liminalWhiteRoomHalfWidth;
+    if (inWhiteRoom) return this.liminalStairRise;
+
     if (Math.abs(z - this.liminalCenterZ) > 1.38) return 0;
     if (x >= this.liminalStairStartX) return 0;
     if (x <= this.liminalStairEndX) return this.liminalStairRise;
@@ -1696,6 +1721,7 @@ class PrivateRoom {
     const seed = this.liminalSeed;
     const stairApproach = clamp((this.liminalStairStartX + 8.0 - x) / 8.0, 0, 1);
     const distortionEase = leftEase * (1 - stairApproach);
+    this.audioCorridorDistortion = distortionEase;
 
     if (x < -12) {
       const modeA = Math.sin(seed * .017) > 0 ? 1 : -1;
@@ -2122,8 +2148,245 @@ class PrivateRoom {
     this.scene.add(this.dust);
   }
 
+  ensureAudio() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (this.audioContext) {
+      if (this.audioContext.state === "suspended") this.audioContext.resume().catch(() => {});
+      return;
+    }
+
+    const context = new AudioContextClass();
+    this.audioContext = context;
+    this.audioMaster = context.createGain();
+    this.audioMaster.gain.value = .62;
+    this.audioMaster.connect(context.destination);
+
+    this.ambientInput = context.createGain();
+    this.ambientFilter = context.createBiquadFilter();
+    this.ambientFilter.type = "lowpass";
+    this.ambientFilter.frequency.value = 920;
+    this.ambientFilter.Q.value = .72;
+    this.ambientInput.connect(this.ambientFilter);
+
+    this.ambientCleanGain = context.createGain();
+    this.ambientCleanGain.gain.value = 0;
+    this.ambientFilter.connect(this.ambientCleanGain);
+    this.ambientCleanGain.connect(this.audioMaster);
+
+    this.ambientShaper = context.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let index = 0; index < curve.length; index += 1) {
+      const x = index / (curve.length - 1) * 2 - 1;
+      curve[index] = Math.tanh(x * 8.5);
+    }
+    this.ambientShaper.curve = curve;
+    this.ambientShaper.oversample = "2x";
+
+    this.ambientGlitchFilter = context.createBiquadFilter();
+    this.ambientGlitchFilter.type = "bandpass";
+    this.ambientGlitchFilter.frequency.value = 640;
+    this.ambientGlitchFilter.Q.value = 2.8;
+    this.ambientGlitchGain = context.createGain();
+    this.ambientGlitchGain.gain.value = 0;
+    this.ambientFilter.connect(this.ambientShaper);
+    this.ambientShaper.connect(this.ambientGlitchFilter);
+    this.ambientGlitchFilter.connect(this.ambientGlitchGain);
+    this.ambientGlitchGain.connect(this.audioMaster);
+
+    const glitchDelay = context.createDelay(.7);
+    glitchDelay.delayTime.value = .19;
+    const glitchFeedback = context.createGain();
+    glitchFeedback.gain.value = .31;
+    this.ambientGlitchFilter.connect(glitchDelay);
+    glitchDelay.connect(glitchFeedback);
+    glitchFeedback.connect(glitchDelay);
+    glitchDelay.connect(this.ambientGlitchGain);
+
+    [
+      [48.0, "sine", .034, 7.0],
+      [71.3, "triangle", .021, -9.0],
+      [96.7, "sine", .016, 13.0],
+      [143.1, "sine", .009, -16.0]
+    ].forEach(([frequency, type, level, detune]) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = type;
+      oscillator.frequency.value = frequency;
+      oscillator.detune.value = detune;
+      gain.gain.value = level;
+      oscillator.connect(gain);
+      gain.connect(this.ambientInput);
+
+      const lfo = context.createOscillator();
+      const lfoDepth = context.createGain();
+      lfo.type = "sine";
+      lfo.frequency.value = random(.025, .075);
+      lfoDepth.gain.value = random(3.5, 10.5);
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(oscillator.detune);
+      oscillator.start();
+      lfo.start();
+    });
+
+    const noiseLength = context.sampleRate * 4;
+    const noiseBuffer = context.createBuffer(1, noiseLength, context.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    let smoothed = 0;
+    for (let index = 0; index < noiseLength; index += 1) {
+      smoothed = smoothed * .86 + (Math.random() * 2 - 1) * .14;
+      noiseData[index] = smoothed;
+    }
+
+    const textureNoise = context.createBufferSource();
+    textureNoise.buffer = noiseBuffer;
+    textureNoise.loop = true;
+    const textureFilter = context.createBiquadFilter();
+    textureFilter.type = "bandpass";
+    textureFilter.frequency.value = 390;
+    textureFilter.Q.value = .55;
+    const textureGain = context.createGain();
+    textureGain.gain.value = .018;
+    textureNoise.connect(textureFilter);
+    textureFilter.connect(textureGain);
+    textureGain.connect(this.ambientInput);
+    textureNoise.start();
+
+    const glitchNoise = context.createBufferSource();
+    glitchNoise.buffer = noiseBuffer;
+    glitchNoise.loop = true;
+    const glitchNoiseFilter = context.createBiquadFilter();
+    glitchNoiseFilter.type = "highpass";
+    glitchNoiseFilter.frequency.value = 760;
+    this.glitchNoiseGain = context.createGain();
+    this.glitchNoiseGain.gain.value = 0;
+    glitchNoise.connect(glitchNoiseFilter);
+    glitchNoiseFilter.connect(this.glitchNoiseGain);
+    this.glitchNoiseGain.connect(this.audioMaster);
+    glitchNoise.start(random(0, 1.5));
+
+    const windNoise = context.createBufferSource();
+    windNoise.buffer = noiseBuffer;
+    windNoise.loop = true;
+    const windHighpass = context.createBiquadFilter();
+    windHighpass.type = "highpass";
+    windHighpass.frequency.value = 180;
+    const windLowpass = context.createBiquadFilter();
+    windLowpass.type = "lowpass";
+    windLowpass.frequency.value = 1450;
+    this.windGain = context.createGain();
+    this.windGain.gain.value = 0;
+    windNoise.connect(windHighpass);
+    windHighpass.connect(windLowpass);
+    windLowpass.connect(this.windGain);
+    this.windGain.connect(this.audioMaster);
+    windNoise.start(random(0, 2.5));
+
+    const footstepLength = Math.floor(context.sampleRate * .16);
+    this.footstepBuffer = context.createBuffer(1, footstepLength, context.sampleRate);
+    const footstepData = this.footstepBuffer.getChannelData(0);
+    for (let index = 0; index < footstepLength; index += 1) {
+      const envelope = Math.exp(-index / (context.sampleRate * .027));
+      footstepData[index] = (Math.random() * 2 - 1) * envelope;
+    }
+
+    context.resume().catch(() => {});
+  }
+
+  playFootstep(running) {
+    const context = this.audioContext;
+    if (!context || !this.footstepBuffer || context.state !== "running") return;
+    const now = context.currentTime;
+    const source = context.createBufferSource();
+    source.buffer = this.footstepBuffer;
+    source.playbackRate.value = random(running ? 1.08 : .86, running ? 1.28 : 1.08);
+
+    const filter = context.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = random(running ? 520 : 390, running ? 760 : 590);
+    filter.Q.value = .7;
+
+    const gain = context.createGain();
+    const volume = running ? .105 : .072;
+    gain.gain.setValueAtTime(.0001, now);
+    gain.gain.exponentialRampToValueAtTime(volume, now + .008);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + .14);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.audioMaster);
+    source.start(now);
+    source.stop(now + .16);
+
+    const thump = context.createOscillator();
+    const thumpGain = context.createGain();
+    thump.type = "sine";
+    thump.frequency.setValueAtTime(running ? 108 : 86, now);
+    thump.frequency.exponentialRampToValueAtTime(48, now + .095);
+    thumpGain.gain.setValueAtTime(volume * .48, now);
+    thumpGain.gain.exponentialRampToValueAtTime(.0001, now + .11);
+    thump.connect(thumpGain);
+    thumpGain.connect(this.audioMaster);
+    thump.start(now);
+    thump.stop(now + .12);
+  }
+
+  updateAudio() {
+    const context = this.audioContext;
+    if (!context || !this.audioMaster) return;
+    const now = context.currentTime;
+    const inCorridor = this.liminalEntered && !this.skyMode;
+    const x = this.freeCameraPosition.x;
+    const stairApproach = inCorridor
+      ? clamp((this.liminalStairStartX + 11.0 - x) / 11.0, 0, 1)
+      : 0;
+    const stairHeight = inCorridor
+      ? this.getLiminalStairHeight(this.freeCameraPosition.x, this.freeCameraPosition.z)
+      : 0;
+    const climb = clamp(stairHeight / this.liminalStairRise, 0, 1);
+    const roomDepth = inCorridor
+      ? clamp(
+        (this.liminalStairEndX - x) / (this.liminalStairEndX - this.liminalStairExitX),
+        0,
+        1
+      )
+      : 0;
+
+    const ambientLevel = inCorridor ? .115 * Math.pow(1 - stairApproach, 1.7) : 0;
+    const distortion = inCorridor ? clamp(this.audioCorridorDistortion, 0, 1) : 0;
+    const cleanLevel = ambientLevel * (1 - distortion * .88);
+    const brokenLevel = ambientLevel * (.08 + distortion * 1.18);
+    const windLevel = this.skyMode
+      ? .135
+      : inCorridor
+        ? clamp(stairApproach * .018 + climb * .125 + roomDepth * .035, 0, .17)
+        : 0;
+
+    this.ambientCleanGain.gain.setTargetAtTime(cleanLevel, now, .12);
+    this.ambientGlitchGain.gain.setTargetAtTime(brokenLevel, now, .085);
+    this.glitchNoiseGain.gain.setTargetAtTime(ambientLevel * distortion * .31, now, .07);
+    this.windGain.gain.setTargetAtTime(windLevel, now, .18);
+    this.ambientGlitchFilter.frequency.setTargetAtTime(
+      lerp(980, 270 + Math.sin(this.elapsed * 7.3) * 95, distortion),
+      now,
+      .06
+    );
+
+    const movingOnGround = this.freeCameraEnabled && !this.skyMode && this.walkAmount > .17;
+    const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
+    const footstepIndex = Math.floor(this.walkPhase / (Math.PI * 1.22));
+    if (movingOnGround && footstepIndex !== this.lastFootstepIndex) {
+      this.lastFootstepIndex = footstepIndex;
+      this.playFootstep(running);
+    } else if (!movingOnGround) {
+      this.lastFootstepIndex = footstepIndex;
+    }
+  }
+
   bindEvents() {
     this.setupMobileControls();
+    const unlockAudio = () => this.ensureAudio();
+    window.addEventListener("pointerdown", unlockAudio, { passive: true });
+    window.addEventListener("keydown", unlockAudio, { passive: true });
     this.doorPrompt?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -2448,8 +2711,19 @@ class PrivateRoom {
 
     if (!this.skyMode && this.liminalEntered) {
       const climb = clamp(stairHeight / this.liminalStairRise, 0, 1);
-      const glareProgress = clamp((climb - .58) / .40, 0, 1);
-      this.skyGlare = glareProgress * glareProgress * (3 - 2 * glareProgress);
+      const stairGlareProgress = clamp((climb - .62) / .38, 0, 1);
+      const stairGlareEase = stairGlareProgress * stairGlareProgress * (3 - 2 * stairGlareProgress);
+      const stairGlare = stairGlareEase * .58;
+
+      const roomProgress = clamp(
+        (this.liminalStairEndX - this.freeCameraPosition.x)
+          / (this.liminalStairEndX - this.liminalStairExitX),
+        0,
+        1
+      );
+      const roomEase = roomProgress * roomProgress * (3 - 2 * roomProgress);
+      const roomGlare = roomProgress > 0 ? lerp(.58, .94, roomEase) : 0;
+      this.skyGlare = Math.max(stairGlare, roomGlare);
       if (this.transitionBlackout) {
         this.transitionBlackout.style.background = this.skyGlare > 0 ? "#fff" : "#000";
         this.transitionBlackout.style.opacity = this.skyGlare.toFixed(3);
@@ -2489,7 +2763,11 @@ class PrivateRoom {
       if (Math.abs(x) <= 1.62 && z < centerZ - .15) return false;
     }
     if (this.liminalEntered && z < this.liminalDoorZ + .42) return true;
-    if (x < -160.45 || x > 151.2) return true;
+    if (x < this.liminalWhiteRoomFarX + .28 || x > 151.2) return true;
+
+    if (x <= this.liminalStairEndX + .12) {
+      return Math.abs(z - centerZ) > this.liminalWhiteRoomHalfWidth - .24;
+    }
 
     let halfWidth = 3.18;
     if (x > 0) {
@@ -2768,6 +3046,7 @@ class PrivateRoom {
     this.updateTheme(delta);
     this.updateCamera(delta);
     this.updateEffects(delta);
+    this.updateAudio();
     this.renderFrame();
   }
 }
