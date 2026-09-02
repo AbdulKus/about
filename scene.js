@@ -661,8 +661,8 @@ class PrivateRoom {
     this.doorPivot.add(handle);
   }
 
-  createCurtain(width, height, segments, material) {
-    const geometry = new THREE.PlaneGeometry(width, height, segments, 96);
+  createCurtain(width, height, segments, material, verticalSegments = 96) {
+    const geometry = new THREE.PlaneGeometry(width, height, segments, verticalSegments);
     const position = geometry.attributes.position;
     for (let index = 0; index < position.count; index += 1) {
       const x = position.getX(index);
@@ -932,8 +932,12 @@ class PrivateRoom {
     const leftCurtainCenterX = -(leftLength + junctionHalfGap) * .5;
     const leftCurtainMaterialA = this.curtainMaterial.clone();
     const leftCurtainMaterialB = this.curtainMaterial.clone();
-    const leftCurtainA = this.createLiminalCurtain(leftCurtainLength, 7.15, leftCurtainMaterialA, this.liminalSeed + 31);
-    const leftCurtainB = this.createLiminalCurtain(leftCurtainLength, 7.15, leftCurtainMaterialB, this.liminalSeed + 79);
+    // Use the exact Black Lodge curtain shape from the main room here too.
+    // Long corridor curtains use fewer subdivisions only to keep the live
+    // procedural distortion affordable; the fold formula itself is identical.
+    const leftCurtainSegments = Math.max(420, Math.round(leftCurtainLength * 3.2));
+    const leftCurtainA = this.createCurtain(leftCurtainLength, 7.15, leftCurtainSegments, leftCurtainMaterialA, 32);
+    const leftCurtainB = this.createCurtain(leftCurtainLength, 7.15, leftCurtainSegments, leftCurtainMaterialB, 32);
     leftCurtainA.position.set(leftCurtainCenterX, 3.575, this.liminalCenterZ - 3.25);
     leftCurtainB.position.set(leftCurtainCenterX, 3.575, this.liminalCenterZ + 3.25);
     level.add(leftCurtainA, leftCurtainB);
