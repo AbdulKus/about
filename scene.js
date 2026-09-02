@@ -105,12 +105,17 @@ class PrivateRoom {
     this.skyCloudTime = 0;
     this.skyWalkTime = 0;
     this.skyMeadowStarted = false;
+    this.skyMeadowGrounded = false;
     this.skyMeadowProgress = 0;
-    this.skyMeadowRiseDuration = 20;
-    this.skyMeadowOrigin = new THREE.Vector3();
-    this.skyMeadowDirection = new THREE.Vector3(0, 0, -1);
-    this.skyMeadowTargetY = 0;
+    this.skyMeadowRiseDuration = 300;
+    this.skyMeadowBaseY = 0;
     this.skyMeadowCameraY = 0;
+    this.skyMeadowGroundWalkTime = 0;
+    this.skyMeadowDirection = new THREE.Vector3(0, 0, -1);
+    this.skyDoorSpawned = false;
+    this.skyDoorReveal = 0;
+    this.skyMeadowTileCenterX = Number.NaN;
+    this.skyMeadowTileCenterZ = Number.NaN;
     this.skySpawnPosition = new THREE.Vector3();
     this.audioContext = null;
     this.audioMaster = null;
@@ -1625,330 +1630,693 @@ class PrivateRoom {
     this.createSkyMeadowWorld();
   }
 
-  skyMeadowHeightLocal(x, z) {
-    const broad = Math.sin(x * .023) * 2.4
-      + Math.cos(z * .019 + .8) * 2.05
-      + Math.sin((x + z) * .034 + 1.7) * 1.25;
-    const crossed = Math.sin(x * .061 - .9) * Math.cos(z * .052 + .4) * .72;
-    const rolling = Math.sin(Math.hypot(x + 34, z - 27) * .031) * 1.05;
+  skyMeadowHeightWorld(x, z) {
+    const broad = Math.sin(x * .018) * 3.25
+      + Math.cos(z * .015 + .8) * 2.75
+      + Math.sin((x + z) * .026 + 1.7) * 1.7;
+    const crossed = Math.sin(x * .047 - .9) * Math.cos(z * .041 + .4) * 1.05;
+    const rolling = Math.sin(Math.hypot(x + 34, z - 27) * .024) * 1.45;
     return broad + crossed + rolling;
   }
 
   createSkyMeadowWorld() {
     this.skyMeadowScene = new THREE.Scene();
-    this.skyMeadowScene.fog = new THREE.Fog(0xc8e2ee, 170, 415);
+    this.skyMeadowScene.fog = new THREE.Fog(0xc8e3ef, 250, 430);
     this.skyMeadowRoot = new THREE.Group();
     this.skyMeadowRoot.visible = false;
     this.skyMeadowScene.add(this.skyMeadowRoot);
     this.skyMeadowMaterials = [];
     this.skyDoorMaterials = [];
 
-    const hemisphere = new THREE.HemisphereLight(0xe8f6ff, 0x30471f, 2.25);
+    const hemisphere = new THREE.HemisphereLight(0xf1fbff, 0x28451d, 2.5);
     this.skyMeadowScene.add(hemisphere);
-    const sun = new THREE.DirectionalLight(0xfff0c5, 3.4);
-    sun.position.set(-68, 110, 46);
+    const sun = new THREE.DirectionalLight(0xffefbd, 3.65);
+    sun.position.set(-72, 118, 52);
     this.skyMeadowScene.add(sun);
 
     const textureCanvas = document.createElement("canvas");
-    textureCanvas.width = textureCanvas.height = 512;
+    textureCanvas.width = textureCanvas.height = 1024;
     const textureContext = textureCanvas.getContext("2d");
-    const image = textureContext.createImageData(512, 512);
-    for (let pixel = 0; pixel < 512 * 512; pixel += 1) {
-      const x = pixel % 512;
-      const y = Math.floor(pixel / 512);
-      const grain = Math.sin(x * .19) * 7 + Math.sin(y * .13 + x * .031) * 9 + (Math.random() - .5) * 18;
-      image.data[pixel * 4] = 58 + grain;
-      image.data[pixel * 4 + 1] = 103 + grain * 1.25;
-      image.data[pixel * 4 + 2] = 39 + grain * .48;
-      image.data[pixel * 4 + 3] = 255;
+    const groundGradient = textureContext.createLinearGradient(0, 0, 1024, 1024);
+    groundGradient.addColorStop(0, "#527f37");
+    groundGradient.addColorStop(.46, "#6b963f");
+    groundGradient.addColorStop(1, "#3f702f");
+    textureContext.fillStyle = groundGradient;
+    textureContext.fillRect(0, 0, 1024, 1024);
+    for (let patch = 0; patch < 4200; patch += 1) {
+      const x = Math.random() * 1024;
+      const y = Math.random() * 1024;
+      const radius = random(2, 18);
+      const green = Math.random() > .48;
+      textureContext.fillStyle = green
+        ? "rgba(174,205,103," + random(.018, .075) + ")"
+        : "rgba(20,61,24," + random(.022, .085) + ")";
+      textureContext.beginPath();
+      textureContext.ellipse(x, y, radius, radius * random(.18, .55), random(0, Math.PI), 0, Math.PI * 2);
+      textureContext.fill();
     }
-    textureContext.putImageData(image, 0, 0);
-    for (let blade = 0; blade < 7800; blade += 1) {
-      const x = Math.random() * 512;
-      const y = Math.random() * 512;
-      const light = Math.random() > .58;
-      textureContext.strokeStyle = light
-        ? `rgba(153,190,89,${random(.035, .13)})`
-        : `rgba(15,53,21,${random(.045, .16)})`;
-      textureContext.lineWidth = random(.3, 1);
+    for (let blade = 0; blade < 18500; blade += 1) {
+      const x = Math.random() * 1024;
+      const y = Math.random() * 1024;
+      textureContext.strokeStyle = Math.random() > .56
+        ? "rgba(207,226,137," + random(.025, .12) + ")"
+        : "rgba(12,48,20," + random(.035, .14) + ")";
+      textureContext.lineWidth = random(.35, 1.25);
       textureContext.beginPath();
       textureContext.moveTo(x, y);
-      textureContext.lineTo(x + random(-1.5, 1.5), y - random(2, 7));
+      textureContext.quadraticCurveTo(
+        x + random(-2, 2),
+        y - random(2, 6),
+        x + random(-3.5, 3.5),
+        y - random(5, 13)
+      );
       textureContext.stroke();
     }
     const grassTexture = new THREE.CanvasTexture(textureCanvas);
     grassTexture.colorSpace = THREE.SRGBColorSpace;
     grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
-    grassTexture.repeat.set(28, 28);
-    grassTexture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    const grassBump = grassTexture.clone();
-    grassBump.colorSpace = THREE.NoColorSpace;
-    grassBump.needsUpdate = true;
+    grassTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    grassTexture.magFilter = THREE.LinearFilter;
+    grassTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
-    const terrainGeometry = new THREE.PlaneGeometry(520, 520, 128, 128);
+    const hillFunctionGlsl = `
+      float hillHeight(vec2 p) {
+        float broad = sin(p.x * .018) * 3.25
+          + cos(p.y * .015 + .8) * 2.75
+          + sin((p.x + p.y) * .026 + 1.7) * 1.7;
+        float crossed = sin(p.x * .047 - .9) * cos(p.y * .041 + .4) * 1.05;
+        float rolling = sin(length(p + vec2(34.0, -27.0)) * .024) * 1.45;
+        return broad + crossed + rolling;
+      }
+    `;
+    const terrainGeometry = new THREE.PlaneGeometry(900, 900, 176, 176);
     terrainGeometry.rotateX(-Math.PI / 2);
-    const terrainPositions = terrainGeometry.attributes.position;
-    for (let index = 0; index < terrainPositions.count; index += 1) {
-      const x = terrainPositions.getX(index);
-      const z = terrainPositions.getZ(index);
-      terrainPositions.setY(index, this.skyMeadowHeightLocal(x, z));
-    }
-    terrainGeometry.computeVertexNormals();
-    const terrainMaterial = new THREE.MeshStandardMaterial({
-      color: 0x78a957,
-      map: grassTexture,
-      bumpMap: grassBump,
-      bumpScale: .42,
-      roughness: .96,
-      metalness: 0,
+    const terrainMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uGrassMap: { value: grassTexture },
+        uOpacity: { value: 0 }
+      },
+      vertexShader: `
+        varying vec2 vWorldXZ;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPosition;
+        ${hillFunctionGlsl}
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          float baseY = modelMatrix[3].y;
+          world.y = baseY + hillHeight(world.xz);
+          float epsilon = .7;
+          float leftHeight = hillHeight(world.xz - vec2(epsilon, 0.0));
+          float rightHeight = hillHeight(world.xz + vec2(epsilon, 0.0));
+          float backHeight = hillHeight(world.xz - vec2(0.0, epsilon));
+          float frontHeight = hillHeight(world.xz + vec2(0.0, epsilon));
+          vWorldNormal = normalize(vec3(leftHeight - rightHeight, epsilon * 2.0, backHeight - frontHeight));
+          vWorldXZ = world.xz;
+          vWorldPosition = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        uniform sampler2D uGrassMap;
+        uniform float uOpacity;
+        varying vec2 vWorldXZ;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPosition;
+        void main() {
+          vec2 uvA = vWorldXZ * .017;
+          vec2 uvB = vec2(vWorldXZ.x - vWorldXZ.y, vWorldXZ.x + vWorldXZ.y) * .0057 + .371;
+          vec3 detailA = texture2D(uGrassMap, uvA).rgb;
+          vec3 detailB = texture2D(uGrassMap, uvB).rgb;
+          vec3 albedo = mix(detailA, detailB, .31);
+          vec3 sunDirection = normalize(vec3(-.42, .83, .36));
+          float sunlight = max(dot(normalize(vWorldNormal), sunDirection), 0.0);
+          float soft = .52 + sunlight * .48;
+          float slopeShade = mix(.8, 1.08, clamp(vWorldNormal.y, 0.0, 1.0));
+          vec3 color = albedo * soft * slopeShade;
+          color += vec3(.16, .18, .07) * pow(sunlight, 5.0) * .19;
+          float distanceToCamera = distance(cameraPosition, vWorldPosition);
+          float fog = smoothstep(255.0, 430.0, distanceToCamera);
+          color = mix(color, vec3(.76, .87, .92), fog);
+          gl_FragColor = vec4(color, uOpacity);
+        }
+      `,
       transparent: true,
-      opacity: 0
+      depthWrite: true,
+      side: THREE.DoubleSide
     });
     const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
-    terrain.receiveShadow = true;
+    terrain.frustumCulled = false;
     this.skyMeadowRoot.add(terrain);
     this.skyMeadowTerrain = terrain;
+    this.skyMeadowTerrainMaterial = terrainMaterial;
     this.skyMeadowMaterials.push(terrainMaterial);
 
-    const plantRandom = (() => {
-      let seed = 9317;
-      return () => {
+    const tuftCanvas = document.createElement("canvas");
+    tuftCanvas.width = tuftCanvas.height = 128;
+    const tuftContext = tuftCanvas.getContext("2d");
+    tuftContext.lineCap = "round";
+    for (let blade = 0; blade < 28; blade += 1) {
+      const baseX = 64 + random(-38, 38);
+      const baseY = 126;
+      const tipX = baseX + random(-24, 24);
+      const tipY = random(12, 82);
+      const gradient = tuftContext.createLinearGradient(baseX, baseY, tipX, tipY);
+      gradient.addColorStop(0, "rgba(26,73,25,.86)");
+      gradient.addColorStop(.58, "rgba(105,157,61,.94)");
+      gradient.addColorStop(1, "rgba(200,224,130,.18)");
+      tuftContext.strokeStyle = gradient;
+      tuftContext.lineWidth = random(1.2, 3.3);
+      tuftContext.beginPath();
+      tuftContext.moveTo(baseX, baseY);
+      tuftContext.quadraticCurveTo(baseX + random(-9, 9), (baseY + tipY) * .5, tipX, tipY);
+      tuftContext.stroke();
+    }
+    const tuftTexture = new THREE.CanvasTexture(tuftCanvas);
+    tuftTexture.colorSpace = THREE.SRGBColorSpace;
+    tuftTexture.minFilter = THREE.LinearMipmapLinearFilter;
+
+    const flowerCanvas = document.createElement("canvas");
+    flowerCanvas.width = flowerCanvas.height = 128;
+    const flowerContext = flowerCanvas.getContext("2d");
+    flowerContext.translate(64, 64);
+    flowerContext.shadowColor = "rgba(255,255,255,.45)";
+    flowerContext.shadowBlur = 5;
+    for (let petal = 0; petal < 8; petal += 1) {
+      flowerContext.save();
+      flowerContext.rotate(petal / 8 * Math.PI * 2);
+      const petalGradient = flowerContext.createRadialGradient(0, -24, 2, 0, -24, 25);
+      petalGradient.addColorStop(0, "rgba(255,255,255,.96)");
+      petalGradient.addColorStop(1, "rgba(255,255,255,.12)");
+      flowerContext.fillStyle = petalGradient;
+      flowerContext.beginPath();
+      flowerContext.ellipse(0, -25, 10, 24, 0, 0, Math.PI * 2);
+      flowerContext.fill();
+      flowerContext.restore();
+    }
+    flowerContext.shadowBlur = 0;
+    flowerContext.fillStyle = "#ffe36a";
+    flowerContext.beginPath();
+    flowerContext.arc(0, 0, 13, 0, Math.PI * 2);
+    flowerContext.fill();
+    const flowerTexture = new THREE.CanvasTexture(flowerCanvas);
+    flowerTexture.colorSpace = THREE.SRGBColorSpace;
+    flowerTexture.minFilter = THREE.LinearMipmapLinearFilter;
+
+    const createPlantMaterial = (map, pointScale) => new THREE.ShaderMaterial({
+      uniforms: {
+        uMap: { value: map },
+        uOpacity: { value: 0 },
+        uTime: { value: 0 },
+        uPointScale: { value: pointScale }
+      },
+      vertexShader: `
+        attribute float aSize;
+        attribute float aPhase;
+        attribute vec3 aColor;
+        uniform float uTime;
+        uniform float uPointScale;
+        varying vec3 vColor;
+        varying float vFog;
+        ${hillFunctionGlsl}
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          float baseY = modelMatrix[3].y;
+          world.y = baseY + hillHeight(world.xz) + aSize * .39;
+          world.x += sin(uTime * 1.15 + aPhase) * aSize * .035;
+          vec4 viewPosition = viewMatrix * world;
+          gl_Position = projectionMatrix * viewPosition;
+          gl_PointSize = clamp(aSize * uPointScale / max(1.0, -viewPosition.z), 1.0, 46.0);
+          vColor = aColor;
+          vFog = smoothstep(180.0, 345.0, -viewPosition.z);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        uniform sampler2D uMap;
+        uniform float uOpacity;
+        varying vec3 vColor;
+        varying float vFog;
+        void main() {
+          vec4 sprite = texture2D(uMap, gl_PointCoord);
+          float alpha = sprite.a * uOpacity;
+          if (alpha < .035) discard;
+          vec3 color = sprite.rgb * vColor;
+          color = mix(color, vec3(.76, .87, .92), vFog);
+          gl_FragColor = vec4(color, alpha * (1.0 - vFog * .72));
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.NormalBlending,
+      vertexColors: true
+    });
+    const grassMaterial = createPlantMaterial(tuftTexture, 178);
+    const flowerMaterial = createPlantMaterial(flowerTexture, 116);
+    this.skyMeadowGrassMaterial = grassMaterial;
+    this.skyMeadowFlowerMaterial = flowerMaterial;
+    this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
+
+    const createPlantGeometry = (count, variant, flower = false) => {
+      const positions = new Float32Array(count * 3);
+      const sizes = new Float32Array(count);
+      const phases = new Float32Array(count);
+      const colors = new Float32Array(count * 3);
+      let seed = 7291 + variant * 941 + (flower ? 7109 : 0);
+      const seeded = () => {
         seed = (seed * 16807) % 2147483647;
         return (seed - 1) / 2147483646;
       };
-    })();
-    const dummy = new THREE.Object3D();
-
-    const grassCount = 2600;
-    const bladeGeometry = new THREE.ConeGeometry(.045, .64, 3);
-    const bladeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4f8f37,
-      roughness: .92,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0
-    });
-    const grass = new THREE.InstancedMesh(bladeGeometry, bladeMaterial, grassCount);
-    for (let index = 0; index < grassCount; index += 1) {
-      const x = (plantRandom() - .5) * 490;
-      const z = (plantRandom() - .5) * 490;
-      const height = .42 + plantRandom() * .72;
-      dummy.position.set(x, this.skyMeadowHeightLocal(x, z) + height * .5, z);
-      dummy.rotation.set((plantRandom() - .5) * .12, plantRandom() * Math.PI, (plantRandom() - .5) * .16);
-      dummy.scale.set(.7 + plantRandom() * .9, height / .64, .7 + plantRandom() * .8);
-      dummy.updateMatrix();
-      grass.setMatrixAt(index, dummy.matrix);
+      const flowerPalette = [0xffd55c, 0xfff5dc, 0xf78bb8, 0x80a4ff, 0xa887ea, 0xff866b];
+      for (let index = 0; index < count; index += 1) {
+        positions[index * 3] = (seeded() - .5) * 119;
+        positions[index * 3 + 1] = 0;
+        positions[index * 3 + 2] = (seeded() - .5) * 119;
+        sizes[index] = flower
+          ? .32 + seeded() * .38
+          : 1.15 + seeded() * 1.15;
+        phases[index] = seeded() * Math.PI * 2;
+        const color = flower
+          ? new THREE.Color(flowerPalette[Math.floor(seeded() * flowerPalette.length)])
+          : new THREE.Color().setHSL(.255 + seeded() * .055, .42 + seeded() * .26, .42 + seeded() * .18);
+        colors[index * 3] = color.r;
+        colors[index * 3 + 1] = color.g;
+        colors[index * 3 + 2] = color.b;
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+      geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
+      geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
+      return geometry;
+    };
+    const grassGeometries = Array.from({ length: 5 }, (_, index) => createPlantGeometry(1550, index, false));
+    const flowerGeometries = Array.from({ length: 5 }, (_, index) => createPlantGeometry(230, index, true));
+    this.skyMeadowTiles = [];
+    for (let tile = 0; tile < 25; tile += 1) {
+      const grass = new THREE.Points(grassGeometries[tile % grassGeometries.length], grassMaterial);
+      const flowers = new THREE.Points(flowerGeometries[(tile * 3) % flowerGeometries.length], flowerMaterial);
+      grass.frustumCulled = false;
+      flowers.frustumCulled = false;
+      grass.renderOrder = 2;
+      flowers.renderOrder = 3;
+      this.skyMeadowRoot.add(grass, flowers);
+      this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null });
     }
-    grass.instanceMatrix.needsUpdate = true;
-    grass.frustumCulled = false;
-    this.skyMeadowRoot.add(grass);
-    this.skyMeadowGrass = grass;
-    this.skyMeadowMaterials.push(bladeMaterial);
-
-    const flowerCount = 560;
-    const flowerRecords = [[], [], [], []];
-    const stemGeometry = new THREE.CylinderGeometry(.014, .024, .5, 5);
-    const stemMaterial = new THREE.MeshStandardMaterial({
-      color: 0x39792c,
-      roughness: .9,
-      transparent: true,
-      opacity: 0
-    });
-    const stems = new THREE.InstancedMesh(stemGeometry, stemMaterial, flowerCount);
-    for (let index = 0; index < flowerCount; index += 1) {
-      const x = (plantRandom() - .5) * 470;
-      const z = (plantRandom() - .5) * 470;
-      const stemHeight = .3 + plantRandom() * .52;
-      const ground = this.skyMeadowHeightLocal(x, z);
-      dummy.position.set(x, ground + stemHeight * .5, z);
-      dummy.rotation.set((plantRandom() - .5) * .08, plantRandom() * Math.PI, (plantRandom() - .5) * .08);
-      dummy.scale.set(1, stemHeight / .5, 1);
-      dummy.updateMatrix();
-      stems.setMatrixAt(index, dummy.matrix);
-      flowerRecords[index % flowerRecords.length].push({ x, z, y: ground + stemHeight });
-    }
-    stems.instanceMatrix.needsUpdate = true;
-    stems.frustumCulled = false;
-    this.skyMeadowRoot.add(stems);
-    this.skyMeadowMaterials.push(stemMaterial);
-
-    const flowerColors = [0xffe86a, 0xfff5eb, 0xf38ab5, 0x829cff];
-    const flowerGeometry = new THREE.SphereGeometry(.12, 7, 5);
-    flowerRecords.forEach((records, colorIndex) => {
-      const material = new THREE.MeshStandardMaterial({
-        color: flowerColors[colorIndex],
-        emissive: flowerColors[colorIndex],
-        emissiveIntensity: .12,
-        roughness: .7,
-        transparent: true,
-        opacity: 0
-      });
-      const heads = new THREE.InstancedMesh(flowerGeometry, material, records.length);
-      records.forEach((record, index) => {
-        dummy.position.set(record.x, record.y, record.z);
-        dummy.rotation.set(plantRandom() * .4, plantRandom() * Math.PI, plantRandom() * .4);
-        const size = .72 + plantRandom() * .75;
-        dummy.scale.set(size, size * .48, size);
-        dummy.updateMatrix();
-        heads.setMatrixAt(index, dummy.matrix);
-      });
-      heads.instanceMatrix.needsUpdate = true;
-      heads.frustumCulled = false;
-      this.skyMeadowRoot.add(heads);
-      this.skyMeadowMaterials.push(material);
-    });
-
-    const door = new THREE.Group();
-    this.skyMeadowRoot.add(door);
-    this.skyDoorRoot = door;
-    const doorMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2f5147,
-      roughness: .71,
-      metalness: .03,
-      transparent: true,
-      opacity: 0
-    });
-    const frameMaterial = new THREE.MeshStandardMaterial({
-      color: 0xddd2b4,
-      roughness: .82,
-      metalness: .03,
-      transparent: true,
-      opacity: 0
-    });
-    const thresholdMaterial = new THREE.MeshBasicMaterial({
-      color: 0xfff4c7,
-      toneMapped: false,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide
-    });
-    this.skyDoorMaterials.push(doorMaterial, frameMaterial, thresholdMaterial);
-
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(3.65, 6.75, .38, 8, 14, 2), doorMaterial);
-    slab.position.y = 3.48;
-    door.add(slab);
-    [-2.05, 2.05].forEach((x) => {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(.48, 7.5, .68), frameMaterial);
-      post.position.set(x, 3.75, 0);
-      door.add(post);
-    });
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.58, .58, .76), frameMaterial);
-    lintel.position.y = 7.35;
-    door.add(lintel);
-    const step = new THREE.Mesh(new THREE.BoxGeometry(5.1, .28, 1.7), frameMaterial);
-    step.position.set(0, .08, .18);
-    door.add(step);
-    const portalGlow = new THREE.Mesh(new THREE.PlaneGeometry(3.36, 6.48), thresholdMaterial);
-    portalGlow.position.set(0, 3.5, -.205);
-    door.add(portalGlow);
-    const knobMaterial = new THREE.MeshStandardMaterial({
-      color: 0xc7a85d,
-      emissive: 0x49330d,
-      emissiveIntensity: .4,
-      roughness: .28,
-      metalness: .78,
-      transparent: true,
-      opacity: 0
-    });
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(.11, 12, 8), knobMaterial);
-    knob.position.set(1.3, 3.35, .27);
-    door.add(knob);
-    this.skyDoorMaterials.push(knobMaterial);
-    this.skyDoorLight = new THREE.PointLight(0xffe4a3, 0, 28, 1.7);
-    this.skyDoorLight.position.set(0, 3.8, -1.2);
-    door.add(this.skyDoorLight);
 
     const cloudCanvas = document.createElement("canvas");
     cloudCanvas.width = cloudCanvas.height = 256;
     const cloudContext = cloudCanvas.getContext("2d");
-    const cloudGradient = cloudContext.createRadialGradient(128, 128, 12, 128, 128, 124);
-    cloudGradient.addColorStop(0, "rgba(255,255,255,.92)");
-    cloudGradient.addColorStop(.35, "rgba(248,252,255,.78)");
-    cloudGradient.addColorStop(.73, "rgba(230,244,252,.34)");
-    cloudGradient.addColorStop(1, "rgba(220,240,250,0)");
-    cloudContext.fillStyle = cloudGradient;
-    cloudContext.fillRect(0, 0, 256, 256);
+    for (let puff = 0; puff < 9; puff += 1) {
+      const x = 128 + Math.cos(puff / 9 * Math.PI * 2) * random(8, 54);
+      const y = 132 + Math.sin(puff / 9 * Math.PI * 2) * random(4, 25);
+      const radius = random(48, 92);
+      const gradient = cloudContext.createRadialGradient(x - radius * .18, y - radius * .2, 2, x, y, radius);
+      gradient.addColorStop(0, "rgba(255,255,255,.84)");
+      gradient.addColorStop(.48, "rgba(245,251,255,.56)");
+      gradient.addColorStop(1, "rgba(224,242,250,0)");
+      cloudContext.fillStyle = gradient;
+      cloudContext.beginPath();
+      cloudContext.arc(x, y, radius, 0, Math.PI * 2);
+      cloudContext.fill();
+    }
     const meadowCloudTexture = new THREE.CanvasTexture(cloudCanvas);
+    meadowCloudTexture.colorSpace = THREE.SRGBColorSpace;
     const meadowCloudMaterial = new THREE.SpriteMaterial({
       map: meadowCloudTexture,
       color: 0xffffff,
       transparent: true,
       depthWrite: false,
+      depthTest: true,
       opacity: 0
     });
+    this.skyMeadowCloudMaterial = meadowCloudMaterial;
     this.skyMeadowClouds = [];
-    for (let index = 0; index < 22; index += 1) {
+    for (let index = 0; index < 34; index += 1) {
       const sprite = new THREE.Sprite(meadowCloudMaterial);
-      const x = (plantRandom() - .5) * 360;
-      const z = (plantRandom() - .5) * 360;
-      sprite.position.set(x, this.skyMeadowHeightLocal(x, z) + 8 + plantRandom() * 18, z);
-      const scale = 18 + plantRandom() * 32;
-      sprite.scale.set(scale * (1.25 + plantRandom()), scale, 1);
-      sprite.userData.phase = plantRandom() * Math.PI * 2;
+      const size = 18 + Math.random() * 29;
+      sprite.scale.set(size * random(1.35, 2.25), size, 1);
       this.skyMeadowRoot.add(sprite);
-      this.skyMeadowClouds.push(sprite);
+      this.skyMeadowClouds.push({
+        sprite,
+        angle: Math.random() * Math.PI * 2,
+        radius: 22 + Math.random() * 205,
+        size,
+        phase: Math.random() * Math.PI * 2,
+        speed: random(.018, .055)
+      });
     }
     this.skyMeadowMaterials.push(meadowCloudMaterial);
 
-    const butterflyColors = [0xffcb42, 0x69b9ff, 0xf076b4, 0xf6f1dc, 0x8e71e8];
-    const rightWingGeometry = new THREE.PlaneGeometry(.42, .3);
-    rightWingGeometry.translate(.21, 0, 0);
-    const leftWingGeometry = new THREE.PlaneGeometry(.42, .3);
-    leftWingGeometry.translate(-.21, 0, 0);
-    this.skyButterflyMaterials = butterflyColors.map((color) => new THREE.MeshBasicMaterial({
-      color,
+    const woodCanvas = document.createElement("canvas");
+    woodCanvas.width = 768;
+    woodCanvas.height = 1024;
+    const woodContext = woodCanvas.getContext("2d");
+    const plankWidth = woodCanvas.width / 6;
+    for (let plank = 0; plank < 6; plank += 1) {
+      const x = plank * plankWidth;
+      const plankGradient = woodContext.createLinearGradient(x, 0, x + plankWidth, 0);
+      const warmth = plank % 2 ? ["#5a2d19", "#8b5430", "#442015"] : ["#6d3820", "#9d6238", "#4e2718"];
+      plankGradient.addColorStop(0, warmth[0]);
+      plankGradient.addColorStop(.48, warmth[1]);
+      plankGradient.addColorStop(1, warmth[2]);
+      woodContext.fillStyle = plankGradient;
+      woodContext.fillRect(x, 0, plankWidth + 1, 1024);
+      woodContext.fillStyle = "rgba(20,8,3,.58)";
+      woodContext.fillRect(x, 0, 2.2, 1024);
+      for (let grain = 0; grain < 190; grain += 1) {
+        const gx = x + random(4, plankWidth - 4);
+        const gy = random(-30, 1050);
+        const length = random(18, 135);
+        woodContext.strokeStyle = Math.random() > .5
+          ? "rgba(248,176,102," + random(.018, .09) + ")"
+          : "rgba(27,8,3," + random(.03, .13) + ")";
+        woodContext.lineWidth = random(.35, 1.8);
+        woodContext.beginPath();
+        woodContext.moveTo(gx, gy);
+        woodContext.bezierCurveTo(
+          gx + random(-6, 6),
+          gy + length * .32,
+          gx + random(-8, 8),
+          gy + length * .72,
+          gx + random(-4, 4),
+          gy + length
+        );
+        woodContext.stroke();
+      }
+      for (let knot = 0; knot < 5; knot += 1) {
+        const kx = x + random(18, plankWidth - 18);
+        const ky = random(40, 980);
+        woodContext.strokeStyle = "rgba(38,12,5,.42)";
+        woodContext.lineWidth = random(2, 4);
+        woodContext.beginPath();
+        woodContext.ellipse(kx, ky, random(7, 16), random(15, 30), random(-.2, .2), 0, Math.PI * 2);
+        woodContext.stroke();
+      }
+    }
+    const doorTexture = new THREE.CanvasTexture(woodCanvas);
+    doorTexture.colorSpace = THREE.SRGBColorSpace;
+    doorTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const doorBump = doorTexture.clone();
+    doorBump.colorSpace = THREE.NoColorSpace;
+    doorBump.needsUpdate = true;
+
+    this.skyDoorRoot = new THREE.Group();
+    this.skyDoorRoot.visible = false;
+    this.skyMeadowRoot.add(this.skyDoorRoot);
+    const doorMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x8d5934,
+      map: doorTexture,
+      bumpMap: doorBump,
+      bumpScale: .18,
+      roughness: .62,
+      clearcoat: .12,
+      clearcoatRoughness: .64,
+      transparent: true,
+      opacity: 0
+    });
+    const panelMaterial = doorMaterial.clone();
+    panelMaterial.color = new THREE.Color(0x704023);
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4a2a19,
+      map: doorTexture,
+      bumpMap: doorBump,
+      bumpScale: .13,
+      roughness: .72,
+      transparent: true,
+      opacity: 0
+    });
+    const brassMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd1aa4f,
+      emissive: 0x4a2b08,
+      emissiveIntensity: .55,
+      roughness: .24,
+      metalness: .86,
+      transparent: true,
+      opacity: 0
+    });
+    this.skyDoorMaterials.push(doorMaterial, panelMaterial, frameMaterial, brassMaterial);
+
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(3.85, 7.0, .38, 4, 10, 2), doorMaterial);
+    slab.position.y = 3.56;
+    this.skyDoorRoot.add(slab);
+    [-2.15, 2.15].forEach((x) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.58, 7.85, .78), frameMaterial);
+      post.position.set(x, 3.92, 0);
+      this.skyDoorRoot.add(post);
+    });
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.86, .66, .88), frameMaterial);
+    lintel.position.y = 7.7;
+    this.skyDoorRoot.add(lintel);
+    const crown = new THREE.Mesh(new THREE.BoxGeometry(5.35, .22, 1), brassMaterial);
+    crown.position.y = 8.08;
+    this.skyDoorRoot.add(crown);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(5.45, .3, 1.9), frameMaterial);
+    step.position.set(0, .06, .14);
+    this.skyDoorRoot.add(step);
+
+    [-1, 1].forEach((faceSign) => {
+      [-1, 1].forEach((column) => {
+        [2.05, 5.05].forEach((y) => {
+          const panel = new THREE.Mesh(new THREE.BoxGeometry(1.38, 2.18, .12), panelMaterial);
+          panel.position.set(column * .91, y, faceSign * .245);
+          this.skyDoorRoot.add(panel);
+          const panelTop = new THREE.Mesh(new THREE.BoxGeometry(1.58, .1, .16), brassMaterial);
+          panelTop.position.set(column * .91, y + 1.04, faceSign * .31);
+          this.skyDoorRoot.add(panelTop);
+          const panelBottom = panelTop.clone();
+          panelBottom.position.y = y - 1.04;
+          this.skyDoorRoot.add(panelBottom);
+        });
+      });
+      const handlePlate = new THREE.Mesh(new THREE.BoxGeometry(.25, .8, .09), brassMaterial);
+      handlePlate.position.set(1.28, 3.48, faceSign * .285);
+      this.skyDoorRoot.add(handlePlate);
+      const handle = new THREE.Mesh(new THREE.CylinderGeometry(.055, .065, .56, 12), brassMaterial);
+      handle.rotation.z = Math.PI / 2;
+      handle.position.set(1.5, 3.48, faceSign * .36);
+      this.skyDoorRoot.add(handle);
+      const handleEnd = new THREE.Mesh(new THREE.SphereGeometry(.09, 12, 8), brassMaterial);
+      handleEnd.position.set(1.78, 3.48, faceSign * .36);
+      this.skyDoorRoot.add(handleEnd);
+    });
+    [-1, 1].forEach((faceSign) => {
+      for (let hinge = 0; hinge < 3; hinge += 1) {
+        const hingeMesh = new THREE.Mesh(new THREE.BoxGeometry(.12, .48, .075), brassMaterial);
+        hingeMesh.position.set(-1.88, 1.35 + hinge * 2.2, faceSign * .29);
+        this.skyDoorRoot.add(hingeMesh);
+      }
+    });
+    this.skyDoorLight = new THREE.PointLight(0xffd98a, 0, 28, 1.8);
+    this.skyDoorLight.position.set(0, 4.2, 1.4);
+    this.skyDoorRoot.add(this.skyDoorLight);
+
+    const makeWing = (side, lower) => {
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.bezierCurveTo(
+        side * (lower ? .18 : .26),
+        lower ? -.1 : .13,
+        side * (lower ? .48 : .74),
+        lower ? -.42 : .62,
+        side * (lower ? .72 : .92),
+        lower ? -.2 : .3
+      );
+      shape.bezierCurveTo(
+        side * (lower ? .55 : .72),
+        lower ? -.02 : .03,
+        side * .22,
+        lower ? .05 : -.03,
+        0,
+        0
+      );
+      return new THREE.ShapeGeometry(shape, 10);
+    };
+    const upperRightGeometry = makeWing(1, false);
+    const upperLeftGeometry = makeWing(-1, false);
+    const lowerRightGeometry = makeWing(1, true);
+    const lowerLeftGeometry = makeWing(-1, true);
+    const butterflyCount = 28;
+    const wingMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0,
+      depthWrite: false,
       toneMapped: false
-    }));
-    this.skyButterflies = [];
-    for (let index = 0; index < 30; index += 1) {
-      const group = new THREE.Group();
-      const material = this.skyButterflyMaterials[index % this.skyButterflyMaterials.length];
-      const leftWing = new THREE.Mesh(leftWingGeometry, material);
-      const rightWing = new THREE.Mesh(rightWingGeometry, material);
-      leftWing.rotation.z = .18;
-      rightWing.rotation.z = -.18;
-      group.add(leftWing, rightWing);
-      door.parent.add(group);
-      this.skyButterflies.push({
-        group,
-        leftWing,
-        rightWing,
-        phase: plantRandom() * Math.PI * 2,
-        radius: 2.8 + plantRandom() * 8,
-        height: 1.4 + plantRandom() * 6.8,
-        speed: .22 + plantRandom() * .42
-      });
+    });
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x241816,
+      roughness: .7,
+      transparent: true,
+      opacity: 0
+    });
+    this.skyButterflyMeshes = [
+      new THREE.InstancedMesh(upperRightGeometry, wingMaterial, butterflyCount),
+      new THREE.InstancedMesh(upperLeftGeometry, wingMaterial, butterflyCount),
+      new THREE.InstancedMesh(lowerRightGeometry, wingMaterial, butterflyCount),
+      new THREE.InstancedMesh(lowerLeftGeometry, wingMaterial, butterflyCount)
+    ];
+    this.skyButterflyBody = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(.035, .055, .42, 7),
+      bodyMaterial,
+      butterflyCount
+    );
+    this.skyButterflyGroup = new THREE.Group();
+    this.skyButterflyGroup.visible = false;
+    this.skyButterflyMeshes.forEach((mesh) => {
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.frustumCulled = false;
+      this.skyButterflyGroup.add(mesh);
+    });
+    this.skyButterflyBody.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.skyButterflyBody.frustumCulled = false;
+    this.skyButterflyGroup.add(this.skyButterflyBody);
+    this.skyMeadowRoot.add(this.skyButterflyGroup);
+    const butterflyPalette = [0xffc536, 0x67b8ff, 0xf073b8, 0xf9f0de, 0x9379ec, 0xff7b59];
+    for (let index = 0; index < butterflyCount; index += 1) {
+      const color = new THREE.Color(butterflyPalette[index % butterflyPalette.length]);
+      this.skyButterflyMeshes.forEach((mesh) => mesh.setColorAt(index, color));
     }
-    this.skyDoorMaterials.push(...this.skyButterflyMaterials);
+    this.skyButterflyMeshes.forEach((mesh) => {
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    });
+    this.skyButterflies = Array.from({ length: butterflyCount }, (_, index) => ({
+      phase: index * 2.399 + Math.random() * .7,
+      radius: 2.5 + Math.random() * 8.5,
+      height: 1.2 + Math.random() * 7,
+      speed: .2 + Math.random() * .4,
+      scale: .62 + Math.random() * .42
+    }));
+    this.skyDoorMaterials.push(wingMaterial, bodyMaterial);
+    this.skyButterflyDummy = new THREE.Object3D();
   }
 
   startSkyMeadowTransition() {
     if (this.skyMeadowStarted || !this.skyMeadowRoot) return;
     this.skyMeadowStarted = true;
+    this.skyMeadowGrounded = false;
     this.skyMeadowProgress = 0;
-    this.skyMeadowOrigin.copy(this.freeCameraPosition);
-    const look = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
-    if (look.lengthSq() < .1) look.set(0, 0, -1);
-    this.skyMeadowDirection.copy(look.normalize());
-    this.skyMeadowTargetY = this.skyBaseY - this.freeEyeHeight - this.skyMeadowHeightLocal(0, 0);
-    this.skyMeadowRoot.position.set(
-      this.skyMeadowOrigin.x,
-      this.skyMeadowTargetY - 46,
-      this.skyMeadowOrigin.z
-    );
-    const doorX = this.skyMeadowDirection.x * 138;
-    const doorZ = this.skyMeadowDirection.z * 138;
-    const doorY = this.skyMeadowHeightLocal(doorX, doorZ);
-    this.skyDoorRoot.position.set(doorX, doorY, doorZ);
-    this.skyDoorRoot.rotation.y = Math.atan2(this.skyMeadowDirection.x, this.skyMeadowDirection.z);
+    this.skyMeadowGroundWalkTime = 0;
+    this.skyDoorSpawned = false;
+    this.skyDoorReveal = 0;
     this.skyMeadowRoot.visible = true;
+    if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
+    if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
     this.skyMeadowCameraY = this.skyBaseY;
+    this.skyMeadowTileCenterX = Number.NaN;
+    this.skyMeadowTileCenterZ = Number.NaN;
   }
 
-  updateSkyMeadow(delta) {
+  updateSkyMeadowTiles() {
+    if (!this.skyMeadowTiles?.length) return;
+    const tileSize = 120;
+    const centerX = Math.floor(this.freeCameraPosition.x / tileSize);
+    const centerZ = Math.floor(this.freeCameraPosition.z / tileSize);
+    if (centerX === this.skyMeadowTileCenterX && centerZ === this.skyMeadowTileCenterZ) return;
+    this.skyMeadowTileCenterX = centerX;
+    this.skyMeadowTileCenterZ = centerZ;
+    const desired = [];
+    const desiredKeys = new Set();
+    for (let offsetZ = -2; offsetZ <= 2; offsetZ += 1) {
+      for (let offsetX = -2; offsetX <= 2; offsetX += 1) {
+        const tileX = centerX + offsetX;
+        const tileZ = centerZ + offsetZ;
+        const key = tileX + ":" + tileZ;
+        desired.push({ tileX, tileZ, key });
+        desiredKeys.add(key);
+      }
+    }
+    const existing = new Map();
+    const free = [];
+    this.skyMeadowTiles.forEach((record) => {
+      const key = record.tileX === null ? "" : record.tileX + ":" + record.tileZ;
+      if (desiredKeys.has(key)) existing.set(key, record);
+      else free.push(record);
+    });
+    desired.forEach((target) => {
+      if (existing.has(target.key)) return;
+      const record = free.shift();
+      if (!record) return;
+      record.tileX = target.tileX;
+      record.tileZ = target.tileZ;
+      record.grass.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
+      record.flowers.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
+    });
+  }
+
+  spawnSkyDoor() {
+    if (this.skyDoorSpawned || !this.skyDoorRoot || !this.skyMeadowGrounded) return;
+    this.skyDoorSpawned = true;
+    this.skyDoorReveal = 0;
+    const direction = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
+    this.skyMeadowDirection.copy(direction);
+    let crestDistance = 78;
+    let crestHeight = Number.NEGATIVE_INFINITY;
+    for (let distance = 70; distance <= 145; distance += 5) {
+      const x = this.freeCameraPosition.x + direction.x * distance;
+      const z = this.freeCameraPosition.z + direction.z * distance;
+      const height = this.skyMeadowHeightWorld(x, z);
+      if (height > crestHeight) {
+        crestHeight = height;
+        crestDistance = distance;
+      }
+    }
+    const doorDistance = Math.min(178, crestDistance + 34);
+    const doorX = this.freeCameraPosition.x + direction.x * doorDistance;
+    const doorZ = this.freeCameraPosition.z + direction.z * doorDistance;
+    this.skyDoorRoot.position.set(
+      doorX,
+      this.skyMeadowHeightWorld(doorX, doorZ),
+      doorZ
+    );
+    this.skyDoorRoot.rotation.y = Math.atan2(direction.x, direction.z);
+    this.skyDoorRoot.visible = true;
+    this.skyButterflyGroup.visible = true;
+  }
+
+  updateSkyButterflies() {
+    if (!this.skyDoorSpawned || !this.skyButterflyGroup) return;
+    const dummy = this.skyButterflyDummy;
+    const door = this.skyDoorRoot.position;
+    this.skyButterflies.forEach((record, index) => {
+      const angle = this.elapsed * record.speed + record.phase;
+      const x = door.x + Math.cos(angle) * record.radius;
+      const z = door.z + Math.sin(angle) * record.radius * .64;
+      const terrainY = this.skyMeadowHeightWorld(x, z);
+      const y = Math.max(
+        terrainY + .7,
+        door.y + record.height + Math.sin(angle * 2.3 + record.phase) * .65
+      );
+      const yaw = -angle + Math.PI * .5;
+      const flap = Math.sin(this.elapsed * (10.5 + index % 6) + record.phase) * 1.08;
+      const scale = record.scale * (.92 + Math.sin(angle * 1.7) * .08);
+      const setWing = (mesh, flapAmount) => {
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(Math.sin(angle * 1.3) * .12, yaw + flapAmount, Math.cos(angle) * .08);
+        dummy.scale.setScalar(scale);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(index, dummy.matrix);
+      };
+      setWing(this.skyButterflyMeshes[0], flap);
+      setWing(this.skyButterflyMeshes[1], -flap);
+      setWing(this.skyButterflyMeshes[2], flap * .72);
+      setWing(this.skyButterflyMeshes[3], -flap * .72);
+      dummy.position.set(x, y, z);
+      dummy.rotation.set(0, yaw, Math.sin(angle) * .18);
+      dummy.scale.setScalar(scale);
+      dummy.updateMatrix();
+      this.skyButterflyBody.setMatrixAt(index, dummy.matrix);
+    });
+    this.skyButterflyMeshes.forEach((mesh) => {
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+    this.skyButterflyBody.instanceMatrix.needsUpdate = true;
+  }
+
+  updateSkyMeadow(delta, movingOnSky) {
     if (!this.skyMeadowStarted || !this.skyMeadowRoot) return this.skyBaseY;
     this.skyMeadowProgress = clamp(
       this.skyMeadowProgress + delta / this.skyMeadowRiseDuration,
@@ -1957,46 +2325,63 @@ class PrivateRoom {
     );
     const progress = this.skyMeadowProgress;
     const rise = progress * progress * (3 - 2 * progress);
-    this.skyMeadowRoot.position.y = lerp(this.skyMeadowTargetY - 46, this.skyMeadowTargetY, rise);
-    const meadowOpacity = clamp(progress / .24, 0, 1);
-    this.skyMeadowMaterials.forEach((material) => {
-      material.opacity = meadowOpacity;
+    const contactBaseY = this.skyBaseY
+      - this.freeEyeHeight
+      - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
+
+    if (!this.skyMeadowGrounded) {
+      this.skyMeadowRoot.position.y = contactBaseY - 46 * (1 - rise);
+      this.skyMeadowCameraY = this.skyBaseY;
+      if (progress >= 1) {
+        this.skyMeadowGrounded = true;
+        this.skyMeadowBaseY = contactBaseY;
+        this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
+      }
+    } else {
+      this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
+      if (movingOnSky) this.skyMeadowGroundWalkTime += delta;
+      if (this.skyMeadowGroundWalkTime >= 105) this.spawnSkyDoor();
+      const groundEye = this.skyMeadowBaseY
+        + this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z)
+        + this.freeEyeHeight;
+      this.skyMeadowCameraY = damp(this.skyMeadowCameraY, groundEye, 6.4, delta);
+    }
+
+    this.skyMeadowTerrain.position.x = this.freeCameraPosition.x;
+    this.skyMeadowTerrain.position.z = this.freeCameraPosition.z;
+    this.updateSkyMeadowTiles();
+
+    const terrainOpacity = clamp(progress / .16, 0, 1);
+    const plantOpacity = clamp((progress - .06) / .28, 0, 1);
+    this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = terrainOpacity;
+    this.skyMeadowGrassMaterial.uniforms.uOpacity.value = plantOpacity;
+    this.skyMeadowGrassMaterial.uniforms.uTime.value = this.elapsed;
+    this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = plantOpacity;
+    this.skyMeadowFlowerMaterial.uniforms.uTime.value = this.elapsed;
+    this.skyMeadowCloudMaterial.opacity = clamp((progress - .1) / .25, 0, .88);
+
+    this.skyMeadowClouds.forEach((record, index) => {
+      const angle = record.angle + this.elapsed * record.speed;
+      const x = this.freeCameraPosition.x + Math.cos(angle) * record.radius;
+      const z = this.freeCameraPosition.z + Math.sin(angle) * record.radius * .78;
+      const touchHeight = this.skyMeadowHeightWorld(x, z)
+        + record.size * .31
+        + .4
+        + Math.sin(this.elapsed * .14 + record.phase + index) * .28;
+      record.sprite.position.set(x, touchHeight, z);
     });
 
-    const doorReveal = clamp((progress - .66) / .28, 0, 1);
-    this.skyDoorMaterials.forEach((material) => {
-      material.opacity = doorReveal;
-    });
-    if (this.skyDoorLight) this.skyDoorLight.intensity = doorReveal * (2.2 + Math.sin(this.elapsed * 1.8) * .35);
-
-    const doorPosition = this.skyDoorRoot.position;
-    this.skyButterflies?.forEach((record, index) => {
-      const angle = this.elapsed * record.speed + record.phase;
-      record.group.position.set(
-        doorPosition.x + Math.cos(angle) * record.radius,
-        doorPosition.y + record.height + Math.sin(angle * 2.1 + index) * .72,
-        doorPosition.z + Math.sin(angle) * record.radius * .62
-      );
-      record.group.rotation.y = -angle + Math.PI * .5;
-      const flap = Math.sin(this.elapsed * (10.5 + index % 5) + record.phase) * 1.05;
-      record.leftWing.rotation.y = flap;
-      record.rightWing.rotation.y = -flap;
-      record.group.scale.setScalar(.68 + Math.sin(angle * 1.7) * .12);
-    });
-    this.skyMeadowClouds?.forEach((cloud, index) => {
-      cloud.position.x += Math.sin(this.elapsed * .08 + cloud.userData.phase) * delta * .12;
-      cloud.position.y += Math.sin(this.elapsed * .19 + cloud.userData.phase + index) * delta * .055;
-    });
-
-    const localX = this.freeCameraPosition.x - this.skyMeadowRoot.position.x;
-    const localZ = this.freeCameraPosition.z - this.skyMeadowRoot.position.z;
-    const surfaceEye = this.skyMeadowRoot.position.y
-      + this.skyMeadowHeightLocal(localX, localZ)
-      + this.freeEyeHeight;
-    const surfaceBlendRaw = clamp((progress - .82) / .18, 0, 1);
-    const surfaceBlend = surfaceBlendRaw * surfaceBlendRaw * (3 - 2 * surfaceBlendRaw);
-    const targetEye = lerp(this.skyBaseY, surfaceEye, surfaceBlend);
-    this.skyMeadowCameraY = damp(this.skyMeadowCameraY, targetEye, progress >= .999 ? 6.2 : 3.6, delta);
+    if (this.skyDoorSpawned) {
+      this.skyDoorReveal = clamp(this.skyDoorReveal + delta / 4.2, 0, 1);
+      const reveal = this.skyDoorReveal * this.skyDoorReveal * (3 - 2 * this.skyDoorReveal);
+      this.skyDoorMaterials.forEach((material) => {
+        material.opacity = reveal;
+      });
+      if (this.skyDoorLight) {
+        this.skyDoorLight.intensity = reveal * (2.8 + Math.sin(this.elapsed * 1.7) * .35);
+      }
+      this.updateSkyButterflies();
+    }
     return this.skyMeadowCameraY;
   }
 
@@ -2039,11 +2424,20 @@ class PrivateRoom {
     this.skyTransition = 0;
     this.skyWalkTime = 0;
     this.skyMeadowStarted = false;
+    this.skyMeadowGrounded = false;
     this.skyMeadowProgress = 0;
+    this.skyMeadowGroundWalkTime = 0;
+    this.skyDoorSpawned = false;
+    this.skyDoorReveal = 0;
+    this.skyMeadowTileCenterX = Number.NaN;
+    this.skyMeadowTileCenterZ = Number.NaN;
     if (this.skyMeadowRoot) this.skyMeadowRoot.visible = false;
-    this.skyMeadowMaterials?.forEach((material) => {
-      material.opacity = 0;
-    });
+    if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
+    if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
+    if (this.skyMeadowTerrainMaterial) this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = 0;
+    if (this.skyMeadowGrassMaterial) this.skyMeadowGrassMaterial.uniforms.uOpacity.value = 0;
+    if (this.skyMeadowFlowerMaterial) this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = 0;
+    if (this.skyMeadowCloudMaterial) this.skyMeadowCloudMaterial.opacity = 0;
     this.skyDoorMaterials?.forEach((material) => {
       material.opacity = 0;
     });
@@ -2114,11 +2508,12 @@ class PrivateRoom {
       this.freeCameraPosition.x - previousX,
       this.freeCameraPosition.z - previousZ
     );
+    const movingOnSky = inputStrength > .04 && actualMovement > .001;
     const skyAdapted = this.skyTransition >= this.skyWhiteHold + this.skyTransitionDuration * .92;
-    if (skyAdapted && inputStrength > .04 && actualMovement > .001) {
+    if (skyAdapted && movingOnSky && !this.skyMeadowStarted) {
       this.skyWalkTime += delta;
     }
-    if (!this.skyMeadowStarted && this.skyWalkTime >= 10) {
+    if (!this.skyMeadowStarted && this.skyWalkTime >= 90) {
       this.startSkyMeadowTransition();
     }
 
@@ -2126,10 +2521,8 @@ class PrivateRoom {
     this.walkAmount = damp(this.walkAmount, movementRatio, movementRatio > this.walkAmount ? 8 : 5.5, delta);
     if (actualMovement > .002) this.walkPhase += delta * (running ? 12.4 : 8.9);
 
-    const meadowEyeY = this.updateSkyMeadow(delta);
-    const groundBlend = this.skyMeadowStarted
-      ? clamp((this.skyMeadowProgress - .88) / .12, 0, 1)
-      : 0;
+    const meadowEyeY = this.updateSkyMeadow(delta, movingOnSky);
+    const groundBlend = this.skyMeadowGrounded ? 1 : 0;
     const bobY = Math.sin(this.walkPhase * 2) * .05 * this.walkAmount * groundBlend;
     const sway = Math.sin(this.walkPhase) * .022 * this.walkAmount * groundBlend;
     this.camera.position.set(
@@ -2139,7 +2532,11 @@ class PrivateRoom {
     );
     this.freeCameraPosition.y = meadowEyeY;
     this.camera.rotation.order = "YXZ";
-    this.camera.rotation.set(this.freePitch, this.freeYaw, Math.sin(this.walkPhase) * .005 * this.walkAmount * groundBlend);
+    this.camera.rotation.set(
+      this.freePitch,
+      this.freeYaw,
+      Math.sin(this.walkPhase) * .005 * this.walkAmount * groundBlend
+    );
   }
 
   registerLiminalDistortion(mesh, kind) {
@@ -5427,7 +5824,7 @@ class PrivateRoom {
       .06
     );
 
-    const skyOnGround = this.skyMode && this.skyMeadowStarted && this.skyMeadowProgress > .9;
+    const skyOnGround = this.skyMode && this.skyMeadowGrounded;
     const movingOnGround = this.freeCameraEnabled
       && ((!this.skyMode && (!this.cityMode || this.cityLanded)) || skyOnGround)
       && this.walkAmount > .17;
@@ -5738,23 +6135,27 @@ class PrivateRoom {
       this.skyTransition = this.skyWhiteHold + this.skyTransitionDuration;
       if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
       if (stageId !== "sky") {
-        this.skyWalkTime = 10;
+        this.skyWalkTime = 90;
         this.startSkyMeadowTransition();
-        this.skyMeadowProgress = stageId === "sky-hills" ? .48 : 1;
+        this.skyMeadowProgress = stageId === "sky-hills" ? .55 : 1;
+        this.updateSkyMeadow(0, false);
         if (stageId === "sky-door") {
-          this.freeCameraPosition.x += this.skyMeadowDirection.x * 92;
-          this.freeCameraPosition.z += this.skyMeadowDirection.z * 92;
-        }
-        this.updateSkyMeadow(0);
-        if (stageId === "sky-door") {
-          const localX = this.freeCameraPosition.x - this.skyMeadowRoot.position.x;
-          const localZ = this.freeCameraPosition.z - this.skyMeadowRoot.position.z;
-          const surfaceEye = this.skyMeadowRoot.position.y
-            + this.skyMeadowHeightLocal(localX, localZ)
+          this.skyMeadowGrounded = true;
+          this.skyMeadowBaseY = this.skyBaseY
+            - this.freeEyeHeight
+            - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
+          this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
+          this.skyMeadowGroundWalkTime = 105;
+          this.spawnSkyDoor();
+          this.freeCameraPosition.x = this.skyDoorRoot.position.x - this.skyMeadowDirection.x * 38;
+          this.freeCameraPosition.z = this.skyDoorRoot.position.z - this.skyMeadowDirection.z * 38;
+          const surfaceEye = this.skyMeadowBaseY
+            + this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z)
             + this.freeEyeHeight;
           this.skyMeadowCameraY = surfaceEye;
           this.freeCameraPosition.y = surfaceEye;
           this.camera.position.set(this.freeCameraPosition.x, surfaceEye, this.freeCameraPosition.z);
+          this.updateSkyMeadow(0, false);
         }
       }
       return;
