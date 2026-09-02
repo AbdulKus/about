@@ -867,10 +867,13 @@ class PrivateRoom {
 
     const gateLeftMaterial = this.curtainMaterial.clone();
     const gateRightMaterial = this.curtainMaterial.clone();
-    this.liminalCurtainLeft = this.createLiminalCurtain(2.16, 6.5, gateLeftMaterial, this.liminalSeed + 14);
-    this.liminalCurtainRight = this.createLiminalCurtain(2.16, 6.5, gateRightMaterial, this.liminalSeed + 29);
-    this.liminalCurtainLeftBaseX = -1.02;
-    this.liminalCurtainRightBaseX = 1.02;
+    // The interactive curtain is the whole rear-passage wall: each leaf spans
+    // half the full 6.4 m passage width with a tiny overlap at the seam.
+    const gateLeafWidth = 3.32;
+    this.liminalCurtainLeft = this.createCurtain(gateLeafWidth, 6.5, 72, gateLeftMaterial, 36);
+    this.liminalCurtainRight = this.createCurtain(gateLeafWidth, 6.5, 72, gateRightMaterial, 36);
+    this.liminalCurtainLeftBaseX = -1.64;
+    this.liminalCurtainRightBaseX = 1.64;
     this.liminalCurtainLeft.position.set(this.liminalCurtainLeftBaseX, 3.25, 0);
     this.liminalCurtainRight.position.set(this.liminalCurtainRightBaseX, 3.25, -.015);
     this.liminalCurtainGate.add(this.liminalCurtainLeft, this.liminalCurtainRight);
@@ -1115,7 +1118,7 @@ class PrivateRoom {
       [16, 'ceiling', .3, 1],
       [33, 'floor', 1, .88],
       [51, 'ceiling', -.35, .95],
-      [68, 'floor', -1, .78],
+      [68, 'ceiling', .34, .78],
       [87, 'ceiling', .2, .84],
       [109, 'ceiling', -.12, .7],
       [132, 'ceiling', .08, .54]
@@ -1185,10 +1188,12 @@ class PrivateRoom {
     );
     const doorEase = this.liminalDoorOpenAmount * this.liminalDoorOpenAmount * (3 - 2 * this.liminalDoorOpenAmount);
     if (this.liminalCurtainLeft && this.liminalCurtainRight) {
-      const gather = 1 - doorEase * .4;
+      const gather = 1 - doorEase * .55;
       const breathe = Math.sin(this.elapsed * 3.1) * .018 * doorEase;
-      this.liminalCurtainLeft.position.x = lerp(this.liminalCurtainLeftBaseX, -2.42, doorEase);
-      this.liminalCurtainRight.position.x = lerp(this.liminalCurtainRightBaseX, 2.42, doorEase);
+      // Gather the full-width leaves against the corridor edges. At full open
+      // they visually become the side bunches instead of exposing empty holes.
+      this.liminalCurtainLeft.position.x = lerp(this.liminalCurtainLeftBaseX, -2.43, doorEase);
+      this.liminalCurtainRight.position.x = lerp(this.liminalCurtainRightBaseX, 2.43, doorEase);
       this.liminalCurtainLeft.position.z = Math.sin(doorEase * Math.PI) * .09 + breathe;
       this.liminalCurtainRight.position.z = Math.sin(doorEase * Math.PI) * .075 - breathe;
       this.liminalCurtainLeft.scale.x = gather;
@@ -1302,7 +1307,7 @@ class PrivateRoom {
       if (leftEase > .01) this.glitch = Math.max(this.glitch, .12 + leftEase * .92);
     }
 
-    if (x > 139 && !this.liminalFall) {
+    if (x > 134.5 && !this.liminalFall) {
       this.liminalFall = true;
       this.liminalFallTime = 0;
       this.freeCameraKeys.clear();
