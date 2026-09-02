@@ -7,8 +7,7 @@ export const SKY_MEADOW_TIMING = Object.freeze({
 export const SKY_MEADOW_SETTINGS = Object.freeze({
   contactDepth: 38,
   tileSize: 104,
-  terrainSize: 720,
-  cloudColor: [0.82, 0.9, 0.94]
+  terrainSize: 720
 });
 
 export function sampleSkyMeadowHeight(x, z) {
@@ -52,16 +51,5 @@ export const SKY_NOISE_GLSL = `
     value += meadowNoise(p * 2.03 + 13.7) * .28;
     value += meadowNoise(p * 4.11 - 7.2) * .17;
     return value;
-  }
-`;
-
-export const SKY_CLOUD_FIELD_GLSL = `
-  float meadowCloudField(vec2 p, float time, float layer) {
-    vec2 drift = vec2(time * (.012 + layer * .003), -time * (.007 + layer * .002));
-    float wide = meadowNoise(p * .011 + drift + layer * 17.3);
-    float folds = meadowNoise(p * .028 - drift * 1.7 - layer * 9.1);
-    float wisps = meadowNoise(p * .073 + drift * 3.1 + layer * 31.7);
-    float shape = wide * .62 + folds * .29 + wisps * .09;
-    return smoothstep(.43, .64, shape);
   }
 `;

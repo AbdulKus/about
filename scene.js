@@ -1,12 +1,11 @@
 import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
 import {
-  SKY_CLOUD_FIELD_GLSL,
   SKY_HILL_GLSL,
   SKY_MEADOW_SETTINGS,
   SKY_MEADOW_TIMING,
   SKY_NOISE_GLSL,
   sampleSkyMeadowHeight
-} from "./sky-meadow.js?v=2";
+} from "./sky-meadow.js?v=3";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, amount) => a + (b - a) * amount;
@@ -1503,7 +1502,9 @@ class PrivateRoom {
         uSpawnPos: { value: new THREE.Vector3() },
         uForward: { value: new THREE.Vector3(0, 0, -1) },
         uRight: { value: new THREE.Vector3(1, 0, 0) },
-        uUp: { value: new THREE.Vector3(0, 1, 0) }
+        uUp: { value: new THREE.Vector3(0, 1, 0) },
+        uCompositeMode: { value: 0 },
+        uMeadowBaseY: { value: 0 }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -1523,6 +1524,10 @@ class PrivateRoom {
         uniform vec3 uForward;
         uniform vec3 uRight;
         uniform vec3 uUp;
+        uniform float uCompositeMode;
+        uniform float uMeadowBaseY;
+
+        ${SKY_HILL_GLSL}
 
         float hash31(vec3 p) {
           p = fract(p * .1031);
@@ -1602,6 +1607,11 @@ class PrivateRoom {
 
           for (int i = 0; i < 24; i++) {
             vec3 pos = ro + rd * t;
+            if (uCompositeMode > .5) {
+              if (i >= 16) break;
+              float groundY = uMeadowBaseY + hillHeight(pos.xz);
+              if (pos.y <= groundY + .14) break;
+            }
             float density = cloudDensity(pos);
             if (density > .006) {
               float edge = 1.0 - smoothstep(.10, .88, density);
@@ -1626,6 +1636,14 @@ class PrivateRoom {
             if (t > 168.0) break;
           }
 
+          if (uCompositeMode > .5) {
+            float cloudOpacity = 1.0 - transmittance;
+            if (cloudOpacity < .006) discard;
+            vec3 foregroundCloud = scattering / max(cloudOpacity, .001);
+            gl_FragColor = vec4(clamp(foregroundCloud, 0.0, 1.12), cloudOpacity * .56);
+            return;
+          }
+
           vec3 color = background * transmittance + scattering;
           float sunThrough = pow(max(dot(rd, sunDir), 0.0), 10.0);
           color += sunColor * sunThrough * transmittance * .20;
@@ -1639,6 +1657,22 @@ class PrivateRoom {
     quad.frustumCulled = false;
     this.skyScene.add(quad);
     this.skyCloudQuad = quad;
+    this.skyCloudOverlayScene = new THREE.Scene();
+    this.skyCloudOverlayMaterial = this.skyCloudMaterial.clone();
+    this.skyCloudOverlayMaterial.uniforms.uCompositeMode.value = 1;
+    this.skyCloudOverlayMaterial.transparent = true;
+    this.skyCloudOverlayMaterial.depthTest = false;
+    this.skyCloudOverlayMaterial.depthWrite = false;
+    this.skyCloudOverlayMaterial.stencilWrite = true;
+    this.skyCloudOverlayMaterial.stencilRef = 1;
+    this.skyCloudOverlayMaterial.stencilFunc = THREE.EqualStencilFunc;
+    this.skyCloudOverlayMaterial.stencilFail = THREE.KeepStencilOp;
+    this.skyCloudOverlayMaterial.stencilZFail = THREE.KeepStencilOp;
+    this.skyCloudOverlayMaterial.stencilZPass = THREE.KeepStencilOp;
+    const overlayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.skyCloudOverlayMaterial);
+    overlayQuad.frustumCulled = false;
+    this.skyCloudOverlayScene.add(overlayQuad);
+    this.skyCloudOverlayQuad = overlayQuad;
     this.createSkyMeadowWorld();
   }
 
@@ -1663,8 +1697,6 @@ class PrivateRoom {
 
     const hillFunctionGlsl = SKY_HILL_GLSL;
     const noiseFunctionGlsl = SKY_NOISE_GLSL;
-    const cloudFieldFunctionGlsl = SKY_CLOUD_FIELD_GLSL;
-
     const terrainSegments = this.isTouch ? 320 : 480;
     const terrainGeometry = new THREE.PlaneGeometry(
       SKY_MEADOW_SETTINGS.terrainSize,
@@ -1706,7 +1738,6 @@ class PrivateRoom {
         varying vec3 vWorldNormal;
         varying vec3 vWorldPosition;
         ${noiseFunctionGlsl}
-        ${cloudFieldFunctionGlsl}
         void main() {
           float broad = meadowFbm(vWorldXZ * .018);
           float fine = meadowNoise(vWorldXZ * .087 + vec2(19.2, -8.4));
@@ -1723,8 +1754,6 @@ class PrivateRoom {
           float slopeShade = mix(.68, 1.08, smoothstep(.7, 1.0, vWorldNormal.y));
           vec3 color = albedo * soft * slopeShade;
           color += vec3(.22, .24, .08) * pow(sunlight, 5.0) * .14;
-          float groundCloud = meadowCloudField(vWorldXZ, uTime, 0.0);
-          color = mix(color, vec3(.78, .88, .9), groundCloud * .28);
           float distanceToCamera = distance(cameraPosition, vWorldPosition);
           float fog = smoothstep(170.0, 390.0, distanceToCamera);
           color = mix(color, vec3(.79, .89, .93), fog);
@@ -1774,11 +1803,15 @@ class PrivateRoom {
         bladeIndices.push(row, row + 2, row + 1, row + 2, row + 3, row + 1);
       }
     };
-    addBlade(0, -.08, .02, .88, .09, .15, .92);
-    addBlade(Math.PI * .5, .08, -.04, .78, .082, -.12, 1.08);
-    addBlade(-.72, -.02, -.08, .68, .075, .1, .82);
-    addBlade(.78, .04, .09, .6, .072, -.08, 1.14);
-    addBlade(2.18, -.1, -.02, .52, .065, .06, .76);
+    addBlade(0, -.34, .04, .92, .082, .17, .92);
+    addBlade(Math.PI * .5, .31, -.08, .84, .078, -.14, 1.08);
+    addBlade(-.72, -.08, -.34, .76, .074, .12, .82);
+    addBlade(.78, .12, .34, .7, .072, -.1, 1.14);
+    addBlade(2.18, -.38, -.24, .64, .068, .08, .76);
+    addBlade(-2.3, .39, .2, .72, .07, -.1, .88);
+    addBlade(1.42, -.04, .04, .96, .086, .18, 1.02);
+    addBlade(-1.46, .35, -.35, .58, .064, .07, .8);
+    addBlade(2.82, -.3, .36, .66, .068, -.09, 1.12);
     grassBaseGeometry.setIndex(bladeIndices);
     grassBaseGeometry.setAttribute("position", new THREE.Float32BufferAttribute(bladePositions, 3));
     grassBaseGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(bladeUvs, 2));
@@ -1905,24 +1938,34 @@ class PrivateRoom {
       vertices.forEach((vertex) => pushFlowerVertex(vertex[0], vertex[1], vertex[2], part, tone));
       flowerIndices.push(first, first + 2, first + 1, first + 2, first + 3, first + 1);
     };
+    const addFlowerPetal = (vertices, tone) => {
+      const first = flowerPositions.length / 3;
+      vertices.forEach((vertex) => pushFlowerVertex(vertex[0], vertex[1], vertex[2], 1, tone));
+      for (let vertex = 1; vertex < vertices.length - 1; vertex += 1) {
+        flowerIndices.push(first, first + vertex, first + vertex + 1);
+      }
+    };
     addFlowerQuad([[-.026, 0, 0], [.026, 0, 0], [-.02, .91, 0], [.02, .91, 0]], 0, .9);
     addFlowerQuad([[0, 0, -.026], [0, 0, .026], [0, .91, -.02], [0, .91, .02]], 0, 1.08);
-    for (let petal = 0; petal < 6; petal += 1) {
-      const angle = petal / 6 * Math.PI * 2;
+    for (let petal = 0; petal < 8; petal += 1) {
+      const angle = petal / 8 * Math.PI * 2;
       const forwardX = Math.cos(angle);
       const forwardZ = Math.sin(angle);
       const rightX = -forwardZ;
       const rightZ = forwardX;
-      const inner = .055;
-      const middle = .22;
-      const outer = .4;
-      const half = .12;
-      addFlowerQuad([
-        [forwardX * inner, .94, forwardZ * inner],
-        [forwardX * middle + rightX * half, .89, forwardZ * middle + rightZ * half],
-        [forwardX * outer, .8 + (petal % 2) * .025, forwardZ * outer],
-        [forwardX * middle - rightX * half, .89, forwardZ * middle - rightZ * half]
-      ], 1, .84 + petal % 3 * .1);
+      const point = (forward, right, y) => [
+        forwardX * forward + rightX * right,
+        y,
+        forwardZ * forward + rightZ * right
+      ];
+      addFlowerPetal([
+        point(.065, 0, .955),
+        point(.17, .085, 1.005),
+        point(.31, .105, .985),
+        point(.43, 0, .92 + (petal % 2) * .018),
+        point(.31, -.105, .985),
+        point(.17, -.085, 1.005)
+      ], .88 + petal % 3 * .07);
     }
     for (let segment = 0; segment < 10; segment += 1) {
       const angleA = segment / 10 * Math.PI * 2;
@@ -2046,7 +2089,7 @@ class PrivateRoom {
     this.skyMeadowFlowerMaterial = flowerMaterial;
     this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
 
-    const grassCount = this.isTouch ? 1800 : 4400;
+    const grassCount = this.isTouch ? 3000 : 7600;
     const flowerCount = this.isTouch ? 140 : 340;
     const grassGeometries = Array.from({ length: 3 }, (_, index) => createGrassGeometry(grassCount, index));
     const flowerGeometries = Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCount, index));
@@ -2059,178 +2102,6 @@ class PrivateRoom {
       this.skyMeadowRoot.add(grass, flowers);
       this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null });
     }
-
-    const mistSegments = this.isTouch ? 140 : 200;
-    const meadowMistGeometry = new THREE.PlaneGeometry(
-      SKY_MEADOW_SETTINGS.terrainSize,
-      SKY_MEADOW_SETTINGS.terrainSize,
-      mistSegments,
-      mistSegments
-    );
-    meadowMistGeometry.rotateX(-Math.PI / 2);
-    const createMeadowMistMaterial = (layer) => new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uOpacity: { value: 0 },
-        uLayer: { value: layer }
-      },
-      vertexShader: `
-        varying vec2 vWorldXZ;
-        varying vec3 vWorldPosition;
-        uniform float uTime;
-        uniform float uLayer;
-        ${hillFunctionGlsl}
-        ${noiseFunctionGlsl}
-        ${cloudFieldFunctionGlsl}
-        void main() {
-          vec4 world = modelMatrix * vec4(position, 1.0);
-          float baseY = modelMatrix[3].y;
-          float coverage = meadowCloudField(world.xz, uTime, uLayer);
-          float breathe = meadowNoise(world.xz * .052 + uTime * .006 + uLayer * 12.0);
-          world.y = baseY
-            + hillHeight(world.xz)
-            + .18
-            + uLayer * .62
-            + coverage * (.32 + uLayer * .24)
-            + breathe * (.14 + uLayer * .06);
-          vWorldXZ = world.xz;
-          vWorldPosition = world.xyz;
-          gl_Position = projectionMatrix * viewMatrix * world;
-        }
-      `,
-      fragmentShader: `
-        precision highp float;
-        uniform float uTime;
-        uniform float uOpacity;
-        uniform float uLayer;
-        varying vec2 vWorldXZ;
-        varying vec3 vWorldPosition;
-        ${noiseFunctionGlsl}
-        ${cloudFieldFunctionGlsl}
-        void main() {
-          float cloud = meadowCloudField(vWorldXZ, uTime, uLayer);
-          float lace = meadowNoise(vWorldXZ * .095 - uTime * .017 + uLayer * 23.0);
-          float fray = meadowNoise(vWorldXZ * .31 + uTime * .009 - uLayer * 14.0);
-          float feather = smoothstep(.0, .72, cloud) * (.42 + lace * .34 + fray * .24);
-          float distanceToCamera = distance(cameraPosition, vWorldPosition);
-          float distanceFade = 1.0 - smoothstep(170.0, 335.0, distanceToCamera);
-          float layerStrength = mix(.5, .3, uLayer);
-          float alpha = feather * layerStrength * uOpacity * distanceFade;
-          if (alpha < .012) discard;
-          vec3 color = mix(vec3(.76, .86, .9), vec3(1.0, .985, .94), cloud * .72 + lace * .16);
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      depthTest: true,
-      side: THREE.DoubleSide
-    });
-    this.skyMeadowCloudMaterials = [
-      createMeadowMistMaterial(0),
-      createMeadowMistMaterial(1)
-    ];
-    this.skyMeadowCloudMaterial = this.skyMeadowCloudMaterials[0];
-    this.skyMeadowCloudLayers = this.skyMeadowCloudMaterials.map((material, index) => {
-      const mist = new THREE.Mesh(meadowMistGeometry, material);
-      mist.renderOrder = 4 + index;
-      mist.frustumCulled = false;
-      this.skyMeadowRoot.add(mist);
-      return mist;
-    });
-    this.skyMeadowMaterials.push(...this.skyMeadowCloudMaterials);
-
-    const createMistPuffGeometry = (count, variant) => {
-      const geometry = new THREE.BufferGeometry();
-      const positions = new Float32Array(count * 3);
-      const sizes = new Float32Array(count);
-      const phases = new Float32Array(count);
-      let seed = 4813 + variant * 6197;
-      const seeded = () => {
-        seed = seed * 16807 % 2147483647;
-        return (seed - 1) / 2147483646;
-      };
-      for (let index = 0; index < count; index += 1) {
-        positions[index * 3] = (seeded() - .5) * this.skyMeadowTileSize;
-        positions[index * 3 + 1] = 0;
-        positions[index * 3 + 2] = (seeded() - .5) * this.skyMeadowTileSize;
-        sizes[index] = 5.5 + seeded() * 8.5;
-        phases[index] = seeded() * Math.PI * 2;
-      }
-      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-      geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
-      geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 3, 0), this.skyMeadowTileSize * .78);
-      return geometry;
-    };
-    this.skyMeadowPuffMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uOpacity: { value: 0 },
-        uPointScale: { value: this.isTouch ? 150 : 190 }
-      },
-      vertexShader: `
-        attribute float aSize;
-        attribute float aPhase;
-        uniform float uTime;
-        uniform float uPointScale;
-        varying float vCoverage;
-        varying float vFog;
-        ${hillFunctionGlsl}
-        ${noiseFunctionGlsl}
-        ${cloudFieldFunctionGlsl}
-        void main() {
-          vec4 world = modelMatrix * vec4(position, 1.0);
-          float baseY = modelMatrix[3].y;
-          float coverage = meadowCloudField(world.xz, uTime, 0.0);
-          world.y = baseY
-            + hillHeight(world.xz)
-            + .72
-            + coverage * 1.25
-            + (.5 + .5 * sin(aPhase + uTime * .12)) * .38;
-          vec4 viewPosition = viewMatrix * world;
-          gl_Position = projectionMatrix * viewPosition;
-          gl_PointSize = clamp(
-            aSize * uPointScale * (.55 + coverage * .55) / max(1.0, -viewPosition.z),
-            3.0,
-            112.0
-          );
-          vCoverage = coverage;
-          vFog = smoothstep(115.0, 245.0, distance(cameraPosition, world.xyz));
-        }
-      `,
-      fragmentShader: `
-        precision highp float;
-        uniform float uOpacity;
-        varying float vCoverage;
-        varying float vFog;
-        void main() {
-          vec2 p = gl_PointCoord * 2.0 - 1.0;
-          float angle = atan(p.y, p.x);
-          float radius = length(p);
-          float scallop = .86 + sin(angle * 5.0) * .06 + sin(angle * 8.0 + 1.4) * .035;
-          float soft = 1.0 - smoothstep(.18, scallop, radius);
-          float core = 1.0 - smoothstep(.05, .72, radius);
-          float alpha = soft * (.07 + core * .13) * smoothstep(.08, .72, vCoverage);
-          alpha *= uOpacity * (1.0 - vFog);
-          if (alpha < .008) discard;
-          vec3 color = mix(vec3(.79, .89, .93), vec3(1.0, .99, .96), core);
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      depthTest: true
-    });
-    const puffCount = this.isTouch ? 24 : 46;
-    const puffGeometries = Array.from({ length: 3 }, (_, index) => createMistPuffGeometry(puffCount, index));
-    this.skyMeadowTiles.forEach((record, index) => {
-      const mist = new THREE.Points(puffGeometries[index % puffGeometries.length], this.skyMeadowPuffMaterial);
-      mist.renderOrder = 7;
-      this.skyMeadowRoot.add(mist);
-      record.mist = mist;
-    });
-    this.skyMeadowMaterials.push(this.skyMeadowPuffMaterial);
 
     const woodCanvas = document.createElement("canvas");
     woodCanvas.width = 512;
@@ -2491,7 +2362,7 @@ class PrivateRoom {
     wingTexture.minFilter = THREE.LinearMipmapLinearFilter;
     wingTexture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
 
-    const butterflyCount = this.isTouch ? 6 : 10;
+    const butterflyCount = this.isTouch ? 2 : 3;
     const butterflyPalette = [0xffcf38, 0x4fb8ff, 0xf06bb4, 0xf8eee0, 0x8d72e8, 0xff714f, 0x58d6a7];
     const addWingColors = (geometry, lower) => {
       const colors = new Float32Array(butterflyCount * 3);
@@ -2598,6 +2469,18 @@ class PrivateRoom {
     this.skyButterflyAdjustment = new THREE.Quaternion();
     this.skyButterflyOffset = new THREE.Vector3();
     this.skyButterflyLocalAxis = new THREE.Vector3(0, 0, 1);
+
+    this.skyMeadowRoot.traverse((object) => {
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.filter(Boolean).forEach((material) => {
+        material.stencilWrite = true;
+        material.stencilRef = 1;
+        material.stencilFunc = THREE.AlwaysStencilFunc;
+        material.stencilFail = THREE.KeepStencilOp;
+        material.stencilZFail = THREE.KeepStencilOp;
+        material.stencilZPass = THREE.ReplaceStencilOp;
+      });
+    });
   }
 
   startSkyMeadowTransition() {
@@ -2653,7 +2536,6 @@ class PrivateRoom {
       record.tileZ = target.tileZ;
       record.grass.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
       record.flowers.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
-      record.mist?.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
     });
   }
 
@@ -2803,10 +2685,6 @@ class PrivateRoom {
 
     this.skyMeadowTerrain.position.x = Math.round(this.freeCameraPosition.x / 12) * 12;
     this.skyMeadowTerrain.position.z = Math.round(this.freeCameraPosition.z / 12) * 12;
-    this.skyMeadowCloudLayers.forEach((mist) => {
-      mist.position.x = this.skyMeadowTerrain.position.x;
-      mist.position.z = this.skyMeadowTerrain.position.z;
-    });
     this.updateSkyMeadowTiles();
 
     const terrainOpacity = clamp(progress / .12, 0, 1);
@@ -2817,12 +2695,6 @@ class PrivateRoom {
     this.skyMeadowGrassMaterial.uniforms.uTime.value = this.elapsed;
     this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = plantOpacity;
     this.skyMeadowFlowerMaterial.uniforms.uTime.value = this.elapsed;
-    this.skyMeadowCloudMaterials.forEach((material) => {
-      material.uniforms.uOpacity.value = clamp((progress - .025) / .16, 0, .94);
-      material.uniforms.uTime.value = this.elapsed;
-    });
-    this.skyMeadowPuffMaterial.uniforms.uOpacity.value = clamp((progress - .04) / .18, 0, 1);
-    this.skyMeadowPuffMaterial.uniforms.uTime.value = this.elapsed;
 
     if (this.skyDoorSpawned) {
       this.skyDoorReveal = clamp(this.skyDoorReveal + delta / 4.2, 0, 1);
@@ -2854,6 +2726,19 @@ class PrivateRoom {
     uniforms.uForward.value.copy(forward);
     uniforms.uRight.value.copy(right);
     uniforms.uUp.value.copy(up);
+    uniforms.uMeadowBaseY.value = this.skyMeadowRoot?.position.y ?? this.skyBaseY;
+    if (this.skyCloudOverlayMaterial) {
+      const overlayUniforms = this.skyCloudOverlayMaterial.uniforms;
+      overlayUniforms.uTime.value = uniforms.uTime.value;
+      overlayUniforms.uAspect.value = uniforms.uAspect.value;
+      overlayUniforms.uTanHalfFov.value = uniforms.uTanHalfFov.value;
+      overlayUniforms.uCameraPos.value.copy(uniforms.uCameraPos.value);
+      overlayUniforms.uSpawnPos.value.copy(uniforms.uSpawnPos.value);
+      overlayUniforms.uForward.value.copy(forward);
+      overlayUniforms.uRight.value.copy(right);
+      overlayUniforms.uUp.value.copy(up);
+      overlayUniforms.uMeadowBaseY.value = uniforms.uMeadowBaseY.value;
+    }
 
     if (this.skyMode) {
       const transitionEnd = this.skyWhiteHold + this.skyTransitionDuration;
@@ -2890,10 +2775,6 @@ class PrivateRoom {
     if (this.skyMeadowTerrainMaterial) this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowGrassMaterial) this.skyMeadowGrassMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowFlowerMaterial) this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = 0;
-    this.skyMeadowCloudMaterials?.forEach((material) => {
-      material.uniforms.uOpacity.value = 0;
-    });
-    if (this.skyMeadowPuffMaterial) this.skyMeadowPuffMaterial.uniforms.uOpacity.value = 0;
     this.skyDoorMaterials?.forEach((material) => {
       material.opacity = 0;
     });
@@ -7387,8 +7268,8 @@ class PrivateRoom {
       this.renderer.clear();
       this.renderer.render(this.skyScene, this.skyRenderCamera);
       if (this.skyMeadowRoot?.visible) {
-        this.renderer.clearDepth();
         this.renderer.render(this.skyMeadowScene, this.camera);
+        this.renderer.render(this.skyCloudOverlayScene, this.skyRenderCamera);
       }
       return;
     }
