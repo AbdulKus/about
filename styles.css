@@ -237,6 +237,10 @@ body.is-sky-mode .noise {
   mix-blend-mode: soft-light;
 }
 
+body.is-sky-mode #world {
+  image-rendering: auto;
+}
+
 .room-loader {
   position: fixed;
   z-index: 100;
