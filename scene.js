@@ -51,9 +51,9 @@ class PrivateRoom {
     this.liminalStairExitX = -184.2;
     this.liminalStairRise = 15.5;
     this.liminalStairSteps = 40;
-    this.liminalWhiteRoomNearX = -169.8;
-    this.liminalWhiteRoomFarX = -190.0;
-    this.liminalWhiteRoomHalfWidth = 5.8;
+    this.liminalWhiteRoomNearX = -159.5;
+    this.liminalWhiteRoomFarX = -198.0;
+    this.liminalWhiteRoomHalfWidth = 9.5;
     this.skyBaseY = 0;
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
@@ -66,6 +66,7 @@ class PrivateRoom {
     this.audioMaster = null;
     this.audioCorridorDistortion = 0;
     this.lastFootstepIndex = -1;
+    this.ambientMelodyIndex = -1;
     this.footstepBuffer = null;
     this.shouldRestoreContacts = sessionStorage.getItem("about-return-to-contacts") === "1";
     this.transitionBlackout = document.querySelector("#transitionBlackout");
@@ -1244,111 +1245,138 @@ class PrivateRoom {
       );
     });
 
-    // The staircase passes through a real opening cut out of the floor of a
-    // separate room. There is no portal plane: every visible white surface is
-    // physical geometry above the stairwell.
+    // The upper room is built from inward-facing planes. From below its
+    // exterior is back-face culled, so only the genuine floor opening reveals
+    // the room; no cube silhouette can leak through the dark stairwell.
     const floorY = this.liminalStairRise;
     const roomNearX = this.liminalWhiteRoomNearX;
     const roomFarX = this.liminalWhiteRoomFarX;
     const roomHalfWidth = this.liminalWhiteRoomHalfWidth;
     const roomLength = roomNearX - roomFarX;
     const roomCenterX = (roomNearX + roomFarX) * .5;
-    const roomHeight = 7.6;
-    const hatchNearX = roomNearX - .18;
+    const roomHeight = 9.2;
+    const hatchNearX = roomNearX - .25;
     const hatchFarX = endX + .02;
     const hatchLength = hatchNearX - hatchFarX;
     const hatchCenterX = (hatchNearX + hatchFarX) * .5;
-    const hatchHalfWidth = 1.72;
+    const hatchHalfWidth = 2.25;
 
     const whiteRoom = new THREE.Group();
     whiteRoom.name = "physicalWhiteRoom";
     exit.add(whiteRoom);
     this.liminalWhiteRoom = whiteRoom;
 
-    const whiteMaterial = new THREE.MeshStandardMaterial({
+    // Unlit white removes dark cubic seams while the room remains real 3D
+    // geometry with a floor opening, walls and a ceiling.
+    const whiteMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
-      roughness: .78,
-      metalness: 0,
-      emissive: 0xffffff,
-      emissiveIntensity: .32
+      side: THREE.FrontSide,
+      toneMapped: false
     });
-    const pearlMaterial = new THREE.MeshStandardMaterial({
-      color: 0xfffcf2,
-      roughness: .36,
-      metalness: .08,
-      emissive: 0xfff8e8,
-      emissiveIntensity: .44
+    const hatchFrameMaterial = new THREE.MeshBasicMaterial({
+      color: 0xf4f0e7,
+      toneMapped: false
+    });
+    const darkUndersideMaterial = new THREE.MeshBasicMaterial({
+      color: 0x020203,
+      side: THREE.FrontSide,
+      toneMapped: false
     });
 
-    const addBox = (width, height, depth, x, y, z, material = whiteMaterial) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
-      mesh.position.set(x, y, z);
-      mesh.receiveShadow = true;
-      whiteRoom.add(mesh);
-      return mesh;
+    const addFloorPlane = (length, depth, x, z) => {
+      const geometry = new THREE.PlaneGeometry(length, depth);
+      const plane = new THREE.Mesh(geometry, whiteMaterial);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(x, floorY, z);
+      whiteRoom.add(plane);
+
+      // A separate downward-facing black skin is the real stairwell ceiling.
+      // It occludes the room from below everywhere except the cut-out hatch.
+      const underside = new THREE.Mesh(geometry, darkUndersideMaterial);
+      underside.rotation.x = Math.PI / 2;
+      underside.position.set(x, floorY - .035, z);
+      whiteRoom.add(underside);
+      return plane;
     };
 
-    // Main floor beyond the opening.
+    // Full floor after the opening.
     const farFloorLength = hatchFarX - roomFarX;
-    addBox(
+    addFloorPlane(
       farFloorLength,
-      .18,
       roomHalfWidth * 2,
       roomFarX + farFloorLength * .5,
-      floorY - .09,
       centerZ
     );
 
-    // Narrow floor cap in front of the opening.
+    // A very small cap closes the floor against the near wall.
     const nearFloorLength = roomNearX - hatchNearX;
-    addBox(
+    addFloorPlane(
       nearFloorLength,
-      .18,
       roomHalfWidth * 2,
       hatchNearX + nearFloorLength * .5,
-      floorY - .09,
       centerZ
     );
 
-    // Side floor slabs leave the stairwell genuinely open.
+    // Long side slabs extend the real opening far down the staircase.
     const sideFloorWidth = roomHalfWidth - hatchHalfWidth;
     [-1, 1].forEach((side) => {
-      addBox(
+      addFloorPlane(
         hatchLength,
-        .18,
         sideFloorWidth,
         hatchCenterX,
-        floorY - .09,
         centerZ + side * (hatchHalfWidth + sideFloorWidth * .5)
       );
     });
 
-    // Walls and ceiling enclose a distinct upper room.
-    addBox(roomLength, roomHeight, .18, roomCenterX, floorY + roomHeight * .5, centerZ - roomHalfWidth);
-    addBox(roomLength, roomHeight, .18, roomCenterX, floorY + roomHeight * .5, centerZ + roomHalfWidth);
-    addBox(.18, roomHeight, roomHalfWidth * 2, roomFarX, floorY + roomHeight * .5, centerZ);
-    addBox(.18, roomHeight, roomHalfWidth * 2, roomNearX, floorY + roomHeight * .5, centerZ);
-    addBox(roomLength, .18, roomHalfWidth * 2, roomCenterX, floorY + roomHeight, centerZ);
+    const sideWallA = new THREE.Mesh(
+      new THREE.PlaneGeometry(roomLength, roomHeight),
+      whiteMaterial
+    );
+    sideWallA.position.set(roomCenterX, floorY + roomHeight * .5, centerZ - roomHalfWidth);
+    whiteRoom.add(sideWallA);
 
-    // A thin frame follows the four real edges of the hole; nothing fills it.
-    addBox(hatchLength, .09, .14, hatchCenterX, floorY + .045, centerZ - hatchHalfWidth, pearlMaterial);
-    addBox(hatchLength, .09, .14, hatchCenterX, floorY + .045, centerZ + hatchHalfWidth, pearlMaterial);
-    addBox(.14, .09, hatchHalfWidth * 2, hatchNearX, floorY + .045, centerZ, pearlMaterial);
-    addBox(.14, .09, hatchHalfWidth * 2, hatchFarX, floorY + .045, centerZ, pearlMaterial);
+    const sideWallB = sideWallA.clone();
+    sideWallB.position.z = centerZ + roomHalfWidth;
+    sideWallB.rotation.y = Math.PI;
+    whiteRoom.add(sideWallB);
 
-    const roomLightPositions = [
-      [roomNearX - 3.0, centerZ - 2.7, 138],
-      [roomCenterX, centerZ + 2.5, 156],
-      [roomFarX + 3.0, centerZ - 1.1, 128]
-    ];
-    roomLightPositions.forEach(([x, z, intensity]) => {
-      const light = new THREE.PointLight(0xfff9e9, intensity, 25, 1.35);
-      light.position.set(x, floorY + roomHeight - 1.0, z);
-      whiteRoom.add(light);
-    });
+    const nearWall = new THREE.Mesh(
+      new THREE.PlaneGeometry(roomHalfWidth * 2, roomHeight),
+      whiteMaterial
+    );
+    nearWall.rotation.y = -Math.PI / 2;
+    nearWall.position.set(roomNearX, floorY + roomHeight * .5, centerZ);
+    whiteRoom.add(nearWall);
 
-    const hatchGlow = new THREE.PointLight(0xffffff, 112, 30, 1.22);
-    hatchGlow.position.set(hatchCenterX, floorY + 2.4, centerZ);
+    const farWall = nearWall.clone();
+    farWall.rotation.y = Math.PI / 2;
+    farWall.position.x = roomFarX;
+    whiteRoom.add(farWall);
+
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(roomLength, roomHalfWidth * 2),
+      whiteMaterial
+    );
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(roomCenterX, floorY + roomHeight, centerZ);
+    whiteRoom.add(ceiling);
+
+    // Only the thin physical rim is double-sided and therefore visible below.
+    const addFramePart = (width, depth, x, z) => {
+      const part = new THREE.Mesh(
+        new THREE.BoxGeometry(width, .10, depth),
+        hatchFrameMaterial
+      );
+      part.position.set(x, floorY, z);
+      whiteRoom.add(part);
+    };
+    addFramePart(hatchLength, .16, hatchCenterX, centerZ - hatchHalfWidth);
+    addFramePart(hatchLength, .16, hatchCenterX, centerZ + hatchHalfWidth);
+    addFramePart(.16, hatchHalfWidth * 2, hatchNearX, centerZ);
+    addFramePart(.16, hatchHalfWidth * 2, hatchFarX, centerZ);
+
+    const hatchGlow = new THREE.PointLight(0xffffff, 92, 34, 1.28);
+    hatchGlow.position.set(hatchCenterX, floorY + 2.8, centerZ);
     whiteRoom.add(hatchGlow);
     const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
     warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
@@ -2204,10 +2232,12 @@ class PrivateRoom {
     glitchDelay.connect(this.ambientGlitchGain);
 
     [
-      [48.0, "sine", .034, 7.0],
-      [71.3, "triangle", .021, -9.0],
-      [96.7, "sine", .016, 13.0],
-      [143.1, "sine", .009, -16.0]
+      [48.0, "sine", .050, 7.0],
+      [71.3, "triangle", .036, -9.0],
+      [96.7, "sine", .030, 13.0],
+      [143.1, "sine", .020, -16.0],
+      [196.0, "sine", .014, 5.0],
+      [293.7, "triangle", .009, -7.0]
     ].forEach(([frequency, type, level, detune]) => {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
@@ -2228,6 +2258,15 @@ class PrivateRoom {
       oscillator.start();
       lfo.start();
     });
+
+    this.ambientMelodyOsc = context.createOscillator();
+    this.ambientMelodyOsc.type = "triangle";
+    this.ambientMelodyOsc.frequency.value = 174.61;
+    this.ambientMelodyGain = context.createGain();
+    this.ambientMelodyGain.gain.value = .0001;
+    this.ambientMelodyOsc.connect(this.ambientMelodyGain);
+    this.ambientMelodyGain.connect(this.ambientInput);
+    this.ambientMelodyOsc.start();
 
     const noiseLength = context.sampleRate * 4;
     const noiseBuffer = context.createBuffer(1, noiseLength, context.sampleRate);
@@ -2270,10 +2309,11 @@ class PrivateRoom {
     windNoise.loop = true;
     const windHighpass = context.createBiquadFilter();
     windHighpass.type = "highpass";
-    windHighpass.frequency.value = 180;
+    windHighpass.frequency.value = 430;
     const windLowpass = context.createBiquadFilter();
     windLowpass.type = "lowpass";
-    windLowpass.frequency.value = 1450;
+    windLowpass.frequency.value = 1650;
+    windLowpass.Q.value = .42;
     this.windGain = context.createGain();
     this.windGain.gain.value = 0;
     windNoise.connect(windHighpass);
@@ -2351,20 +2391,38 @@ class PrivateRoom {
       )
       : 0;
 
-    const ambientLevel = inCorridor ? .115 * Math.pow(1 - stairApproach, 1.7) : 0;
+    const ambientLevel = inCorridor ? .29 * Math.pow(1 - stairApproach, 1.7) : 0;
     const distortion = inCorridor ? clamp(this.audioCorridorDistortion, 0, 1) : 0;
     const cleanLevel = ambientLevel * (1 - distortion * .88);
-    const brokenLevel = ambientLevel * (.08 + distortion * 1.18);
-    const windLevel = this.skyMode
-      ? .135
+    const brokenLevel = ambientLevel * (.025 + distortion * .46);
+
+    const gustA = .5 + .5 * Math.sin(this.elapsed * .43 + .7);
+    const gustB = .5 + .5 * Math.sin(this.elapsed * .19 + 2.3);
+    const gust = Math.pow(clamp(gustA * .72 + gustB * .28, 0, 1), 2.8);
+    const windBase = this.skyMode
+      ? .055
       : inCorridor
-        ? clamp(stairApproach * .018 + climb * .125 + roomDepth * .035, 0, .17)
+        ? clamp(stairApproach * .008 + climb * .046 + roomDepth * .012, 0, .064)
         : 0;
+    const windLevel = windBase * (.10 + gust * .90);
+
+    const melodyStep = Math.floor(this.elapsed / 4.6);
+    if (this.ambientMelodyOsc && this.ambientMelodyGain && melodyStep !== this.ambientMelodyIndex) {
+      this.ambientMelodyIndex = melodyStep;
+      const notes = [146.83, 174.61, 196.0, 220.0, 261.63, 293.66, 220.0, 174.61];
+      const note = notes[Math.abs((melodyStep * 5 + Math.floor(this.liminalSeed)) % notes.length)];
+      this.ambientMelodyOsc.frequency.cancelScheduledValues(now);
+      this.ambientMelodyOsc.frequency.setTargetAtTime(note, now, .75);
+      this.ambientMelodyGain.gain.cancelScheduledValues(now);
+      this.ambientMelodyGain.gain.setValueAtTime(Math.max(.0001, this.ambientMelodyGain.gain.value), now);
+      this.ambientMelodyGain.gain.linearRampToValueAtTime(.075, now + .85);
+      this.ambientMelodyGain.gain.exponentialRampToValueAtTime(.008, now + 4.2);
+    }
 
     this.ambientCleanGain.gain.setTargetAtTime(cleanLevel, now, .12);
     this.ambientGlitchGain.gain.setTargetAtTime(brokenLevel, now, .085);
-    this.glitchNoiseGain.gain.setTargetAtTime(ambientLevel * distortion * .31, now, .07);
-    this.windGain.gain.setTargetAtTime(windLevel, now, .18);
+    this.glitchNoiseGain.gain.setTargetAtTime(ambientLevel * distortion * .19, now, .07);
+    this.windGain.gain.setTargetAtTime(windLevel, now, .11);
     this.ambientGlitchFilter.frequency.setTargetAtTime(
       lerp(980, 270 + Math.sin(this.elapsed * 7.3) * 95, distortion),
       now,
