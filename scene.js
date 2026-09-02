@@ -61,6 +61,9 @@ class PrivateRoom {
     this.cityLanded = false;
     this.cityLandingTime = 0;
     this.cityImpactPlayed = false;
+    this.cityTravelDistance = 0;
+    this.cityBiomechProgress = 0;
+    this.cityBiomechTarget = 0;
     this.skyTransition = 0;
     this.skyWhiteHold = .85;
     this.skyTransitionDuration = 3.25;
@@ -1934,10 +1937,21 @@ class PrivateRoom {
     this.cityScene = new THREE.Scene();
     this.cityScene.background = new THREE.Color(0x02050a);
     this.cityScene.fog = new THREE.FogExp2(0x040810, .0155);
-    this.cityScene.add(new THREE.HemisphereLight(0x7890ad, 0x020305, .62));
-    const moon = new THREE.DirectionalLight(0x91afd5, 1.28);
-    moon.position.set(-38, 68, 24);
-    this.cityScene.add(moon);
+    this.cityHemisphereLight = new THREE.HemisphereLight(0x7890ad, 0x020305, .62);
+    this.cityScene.add(this.cityHemisphereLight);
+    this.cityMoonLight = new THREE.DirectionalLight(0x91afd5, 1.28);
+    this.cityMoonLight.position.set(-38, 68, 24);
+    this.cityScene.add(this.cityMoonLight);
+    this.cityBaseBackground = new THREE.Color(0x02050a);
+    this.cityBioBackground = new THREE.Color(0x110205);
+    this.cityBaseFog = new THREE.Color(0x040810);
+    this.cityBioFog = new THREE.Color(0x190307);
+    this.cityBaseHemisphereColor = new THREE.Color(0x7890ad);
+    this.cityBioHemisphereColor = new THREE.Color(0x8c2435);
+    this.cityBaseGroundLightColor = new THREE.Color(0x020305);
+    this.cityBioGroundLightColor = new THREE.Color(0x170205);
+    this.cityBaseMoonColor = new THREE.Color(0x91afd5);
+    this.cityBioMoonColor = new THREE.Color(0xb93649);
 
     const starGeometry = new THREE.BufferGeometry();
     const starPositions = [];
@@ -2142,6 +2156,152 @@ class PrivateRoom {
     lampGlowContext.fillRect(0, 0, 64, 64);
     this.cityLampGlowTexture = new THREE.CanvasTexture(lampGlowCanvas);
 
+    const bioCanvas = document.createElement("canvas");
+    const bioBumpCanvas = document.createElement("canvas");
+    bioCanvas.width = bioCanvas.height = 512;
+    bioBumpCanvas.width = bioBumpCanvas.height = 512;
+    const bioContext = bioCanvas.getContext("2d");
+    const bioBumpContext = bioBumpCanvas.getContext("2d");
+    bioContext.fillStyle = "#321015";
+    bioContext.fillRect(0, 0, 512, 512);
+    bioBumpContext.fillStyle = "#686868";
+    bioBumpContext.fillRect(0, 0, 512, 512);
+    for (let cell = 0; cell < 260; cell += 1) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const radiusX = 4 + Math.random() * 24;
+      const radiusY = 3 + Math.random() * 15;
+      const lightness = 38 + Math.floor(Math.random() * 42);
+      bioContext.fillStyle = `rgba(${lightness + 42},${10 + lightness * .18},${18 + lightness * .2},${.08 + Math.random() * .18})`;
+      bioContext.beginPath();
+      bioContext.ellipse(x, y, radiusX, radiusY, Math.random() * Math.PI, 0, Math.PI * 2);
+      bioContext.fill();
+      const bump = 72 + Math.floor(Math.random() * 92);
+      bioBumpContext.fillStyle = `rgb(${bump},${bump},${bump})`;
+      bioBumpContext.beginPath();
+      bioBumpContext.ellipse(x, y, radiusX, radiusY, Math.random() * Math.PI, 0, Math.PI * 2);
+      bioBumpContext.fill();
+    }
+    for (let vein = 0; vein < 42; vein += 1) {
+      const startX = Math.random() * 512;
+      const startY = Math.random() * 512;
+      const endX = Math.random() * 512;
+      const endY = Math.random() * 512;
+      bioContext.strokeStyle = vein % 4 ? "rgba(112,13,29,.45)" : "rgba(187,39,54,.48)";
+      bioContext.lineWidth = vein % 4 ? 1 + Math.random() * 3 : 4 + Math.random() * 6;
+      bioContext.beginPath();
+      bioContext.moveTo(startX, startY);
+      bioContext.bezierCurveTo(
+        startX + (Math.random() - .5) * 180,
+        startY + (Math.random() - .5) * 180,
+        endX + (Math.random() - .5) * 180,
+        endY + (Math.random() - .5) * 180,
+        endX,
+        endY
+      );
+      bioContext.stroke();
+      bioBumpContext.strokeStyle = vein % 4 ? "rgba(185,185,185,.55)" : "rgba(225,225,225,.8)";
+      bioBumpContext.lineWidth = bioContext.lineWidth;
+      bioBumpContext.stroke();
+    }
+    const bioTexture = new THREE.CanvasTexture(bioCanvas);
+    bioTexture.colorSpace = THREE.SRGBColorSpace;
+    bioTexture.wrapS = bioTexture.wrapT = THREE.RepeatWrapping;
+    bioTexture.repeat.set(3, 3);
+    bioTexture.anisotropy = maxAnisotropy;
+    const bioBumpTexture = new THREE.CanvasTexture(bioBumpCanvas);
+    bioBumpTexture.colorSpace = THREE.NoColorSpace;
+    bioBumpTexture.wrapS = bioBumpTexture.wrapT = THREE.RepeatWrapping;
+    bioBumpTexture.repeat.set(3, 3);
+    bioBumpTexture.anisotropy = maxAnisotropy;
+    this.cityBioTexture = bioTexture;
+    this.cityBioBumpTexture = bioBumpTexture;
+
+    this.cityFleshMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x55151e,
+      map: bioTexture,
+      bumpMap: bioBumpTexture,
+      bumpScale: .36,
+      roughness: .55,
+      metalness: .04,
+      clearcoat: .24,
+      clearcoatRoughness: .48,
+      sheen: .7,
+      sheenColor: new THREE.Color(0x8d2434),
+      transparent: true,
+      opacity: 0
+    });
+    this.cityMembraneMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x6f1d2a,
+      map: bioTexture,
+      bumpMap: bioBumpTexture,
+      bumpScale: .22,
+      roughness: .38,
+      metalness: 0,
+      transmission: .08,
+      thickness: .45,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    this.cityVeinMaterial = new THREE.MeshStandardMaterial({
+      color: 0x7d0c24,
+      emissive: 0x5b0719,
+      emissiveIntensity: 1.2,
+      roughness: .42,
+      transparent: true,
+      opacity: 0
+    });
+    this.cityCapillaryMaterial = new THREE.MeshBasicMaterial({
+      color: 0xc51e3f,
+      transparent: true,
+      opacity: 0,
+      toneMapped: false
+    });
+    this.cityLivingWindowMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x4f0b18,
+      emissive: 0x9f1730,
+      emissiveIntensity: 1,
+      roughness: .32,
+      clearcoat: .36,
+      transparent: true,
+      opacity: 0
+    });
+    this.cityBioGroundMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x421018,
+      map: bioTexture,
+      bumpMap: bioBumpTexture,
+      bumpScale: .31,
+      roughness: .48,
+      clearcoat: .2,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false
+    });
+    this.cityBoneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x9a806e,
+      roughness: .78,
+      transparent: true,
+      opacity: 0
+    });
+
+    this.cityBuildingMaterials.forEach((material) => {
+      material.userData.cityBaseColor = material.color.clone();
+      material.userData.cityBaseEmissive = material.emissive.clone();
+      material.userData.cityBaseEmissiveIntensity = material.emissiveIntensity;
+      material.bumpMap = bioBumpTexture;
+      material.bumpScale = 0;
+    });
+    this.cityAsphaltMaterial.userData.cityBaseColor = this.cityAsphaltMaterial.color.clone();
+    this.cityPavementMaterial.userData.cityBaseColor = this.cityPavementMaterial.color.clone();
+    this.cityBioBuildingColors = [0x351218, 0x2c0d13, 0x401319, 0x2d1117].map((color) => new THREE.Color(color));
+    this.cityBioBuildingEmissives = [0x65101f, 0x4d0a19, 0x791326, 0x5b0b1b].map((color) => new THREE.Color(color));
+    this.cityBioAsphaltColor = new THREE.Color(0x211014);
+    this.cityBioPavementColor = new THREE.Color(0x35171c);
+    this.cityBaseLampColor = this.cityLampMaterial.color.clone();
+    this.cityBioLampColor = new THREE.Color(0xff6a62);
+
     this.cityChunkSize = 64;
     this.cityChunkGrid = 5;
     this.cityChunks = [];
@@ -2161,11 +2321,25 @@ class PrivateRoom {
     const detailGroup = new THREE.Group();
     chunk.userData.details = detailGroup;
     chunk.add(detailGroup);
+    const bioGroup = new THREE.Group();
+    bioGroup.visible = false;
+    chunk.userData.bioGroup = bioGroup;
+    chunk.userData.bioPulseMeshes = [];
+    chunk.add(bioGroup);
     const size = this.cityChunkSize;
     const seed = Math.abs(Math.sin(gridX * 127.13 + gridZ * 311.71)) + .013;
     const seeded = (salt) => {
       const value = Math.sin((seed + salt) * 43758.5453);
       return value - Math.floor(value);
+    };
+    const registerBioMesh = (mesh, threshold, pulseAmount = .035) => {
+      mesh.userData.bioThreshold = threshold;
+      mesh.userData.bioPulseAmount = pulseAmount;
+      mesh.userData.bioPulsePhase = seeded(threshold * 700 + chunk.userData.bioPulseMeshes.length * 9.3) * Math.PI * 2;
+      mesh.userData.bioBaseScale = mesh.scale.clone();
+      bioGroup.add(mesh);
+      chunk.userData.bioPulseMeshes.push(mesh);
+      return mesh;
     };
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(size + .2, size + .2), this.cityAsphaltMaterial);
@@ -2173,6 +2347,41 @@ class PrivateRoom {
     ground.position.y = -.035;
     ground.receiveShadow = true;
     chunk.add(ground);
+
+    const bioGround = new THREE.Mesh(
+      new THREE.PlaneGeometry(size, size, 28, 28),
+      this.cityBioGroundMaterial
+    );
+    bioGround.rotation.x = -Math.PI / 2;
+    bioGround.position.y = .028;
+    registerBioMesh(bioGround, .04, .008);
+
+    for (let groundVeinIndex = 0; groundVeinIndex < 5; groundVeinIndex += 1) {
+      const horizontal = groundVeinIndex % 2 === 0;
+      const offset = -23 + seeded(410 + groundVeinIndex) * 46;
+      const groundCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(horizontal ? -32 : offset, .055, horizontal ? offset : -32),
+        new THREE.Vector3(horizontal ? -15 : offset + seeded(420 + groundVeinIndex) * 5, .06, horizontal ? offset + 2.5 : -14),
+        new THREE.Vector3(horizontal ? 2 : offset - 2, .065, horizontal ? offset - 2 : 3),
+        new THREE.Vector3(horizontal ? 17 : offset + 3, .06, horizontal ? offset + 1 : 18),
+        new THREE.Vector3(horizontal ? 32 : offset, .055, horizontal ? offset : 32)
+      ]);
+      const groundVein = new THREE.Mesh(
+        new THREE.TubeGeometry(groundCurve, 28, groundVeinIndex % 3 === 0 ? .115 : .055, 6, false),
+        groundVeinIndex % 3 === 0 ? this.cityVeinMaterial : this.cityCapillaryMaterial
+      );
+      registerBioMesh(groundVein, groundVeinIndex % 3 === 0 ? .18 : .3, .018);
+    }
+
+    for (let ribIndex = 0; ribIndex < 3; ribIndex += 1) {
+      const rib = new THREE.Mesh(
+        new THREE.TorusGeometry(5.2, .19 + ribIndex * .025, 7, 30, Math.PI),
+        this.cityBoneMaterial
+      );
+      rib.position.set(0, .22, -20 + ribIndex * 20);
+      rib.rotation.y = ribIndex % 2 ? .08 : -.08;
+      registerBioMesh(rib, .7 + ribIndex * .035, .026);
+    }
 
     const sidewalkSize = 25;
     [[-18.5, -18.5], [18.5, -18.5], [-18.5, 18.5], [18.5, 18.5]].forEach(([x, z], plotIndex) => {
@@ -2354,6 +2563,84 @@ class PrivateRoom {
       );
       doorLamp.position.set(serviceDoor.position.x, 2.55, serviceDoor.position.z + .08);
       detailGroup.add(doorLamp);
+
+      const facadeZ = depth * .527;
+      const fleshBase = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 18, 12),
+        this.cityFleshMaterial
+      );
+      fleshBase.position.set(building.position.x, 1.1, building.position.z + facadeZ);
+      fleshBase.scale.set(width * .42, 1.25 + seeded(plotIndex + 320) * 1.4, .55 + seeded(plotIndex + 321) * .5);
+      registerBioMesh(fleshBase, .4 + seeded(plotIndex + 322) * .12, .055);
+
+      for (let membraneIndex = 0; membraneIndex < 3; membraneIndex += 1) {
+        const membrane = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 16, 10),
+          this.cityMembraneMaterial
+        );
+        membrane.position.set(
+          building.position.x + (seeded(plotIndex * 11 + membraneIndex + 330) - .5) * width * .58,
+          4.2 + membraneIndex * Math.min(5.5, baseHeight * .2),
+          building.position.z + facadeZ + .05
+        );
+        membrane.scale.set(
+          1.1 + seeded(membraneIndex + plotIndex * 3 + 340) * 2.1,
+          .7 + seeded(membraneIndex + plotIndex * 5 + 350) * 1.8,
+          .22
+        );
+        registerBioMesh(membrane, .28 + membraneIndex * .07, .065);
+      }
+
+      for (let veinIndex = 0; veinIndex < 3; veinIndex += 1) {
+        const veinCurve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3((veinIndex - 1) * width * .2, .4, facadeZ + .12),
+          new THREE.Vector3((seeded(plotIndex + veinIndex + 360) - .5) * width * .48, baseHeight * .23, facadeZ + .15),
+          new THREE.Vector3((seeded(plotIndex + veinIndex + 370) - .5) * width * .55, baseHeight * .51, facadeZ + .16),
+          new THREE.Vector3((seeded(plotIndex + veinIndex + 380) - .5) * width * .42, baseHeight * .78, facadeZ + .14),
+          new THREE.Vector3((veinIndex - 1) * width * .17, baseHeight * .96, facadeZ + .12)
+        ]);
+        const vein = new THREE.Mesh(
+          new THREE.TubeGeometry(
+            veinCurve,
+            30,
+            veinIndex === 1 ? .12 : .052,
+            veinIndex === 1 ? 7 : 5,
+            false
+          ),
+          veinIndex === 1 ? this.cityVeinMaterial : this.cityCapillaryMaterial
+        );
+        vein.position.set(building.position.x, 0, building.position.z);
+        registerBioMesh(vein, veinIndex === 1 ? .16 : .3 + veinIndex * .035, veinIndex === 1 ? .025 : .012);
+      }
+
+      const livingWindowCount = 4 + Math.floor(seeded(plotIndex + 390) * 3);
+      for (let livingIndex = 0; livingIndex < livingWindowCount; livingIndex += 1) {
+        const livingWindow = new THREE.Mesh(
+          new THREE.SphereGeometry(.42, 14, 9),
+          this.cityLivingWindowMaterial
+        );
+        livingWindow.position.set(
+          building.position.x + (seeded(plotIndex * 17 + livingIndex + 400) - .5) * width * .62,
+          4.1 + seeded(plotIndex * 23 + livingIndex + 410) * Math.max(4, baseHeight - 7),
+          building.position.z + facadeZ + .19
+        );
+        livingWindow.scale.set(
+          1.15 + seeded(livingIndex + 420) * .85,
+          .55 + seeded(livingIndex + 430) * .5,
+          .28
+        );
+        registerBioMesh(livingWindow, .22 + seeded(livingIndex + plotIndex + 440) * .16, .09);
+      }
+
+      if (baseHeight > 22) {
+        const facadeRib = new THREE.Mesh(
+          new THREE.TorusGeometry(Math.min(width * .27, 3.2), .11, 7, 24, Math.PI),
+          this.cityBoneMaterial
+        );
+        facadeRib.position.set(building.position.x, baseHeight * .58, building.position.z + facadeZ + .12);
+        facadeRib.rotation.z = seeded(plotIndex + 450) > .5 ? .16 : -.16;
+        registerBioMesh(facadeRib, .58 + seeded(plotIndex + 451) * .12, .028);
+      }
     });
 
     const drainMaterial = new THREE.MeshStandardMaterial({ color: 0x090c0f, roughness: .54, metalness: .76 });
@@ -2562,6 +2849,119 @@ class PrivateRoom {
     });
   }
 
+  updateCityBiomech(delta) {
+    const startDistance = 112;
+    const morphDistance = 245;
+    const rawProgress = clamp((this.cityTravelDistance - startDistance) / morphDistance, 0, 1);
+    const easedTarget = rawProgress * rawProgress * (3 - 2 * rawProgress);
+    this.cityBiomechTarget = easedTarget;
+    this.cityBiomechProgress = damp(this.cityBiomechProgress, easedTarget, 1.35, delta);
+    const progress = this.cityBiomechProgress;
+    const heartbeat = .5 + .5 * Math.sin(this.elapsed * 1.72);
+    const deepPulse = .5 + .5 * Math.sin(this.elapsed * .83 + 1.4);
+
+    this.cityScene.background.lerpColors(this.cityBaseBackground, this.cityBioBackground, progress);
+    this.cityScene.fog.color.lerpColors(this.cityBaseFog, this.cityBioFog, progress);
+    this.cityScene.fog.density = lerp(.0155, .023, progress);
+    this.cityHemisphereLight.color.lerpColors(
+      this.cityBaseHemisphereColor,
+      this.cityBioHemisphereColor,
+      progress
+    );
+    this.cityHemisphereLight.groundColor.lerpColors(
+      this.cityBaseGroundLightColor,
+      this.cityBioGroundLightColor,
+      progress
+    );
+    this.cityHemisphereLight.intensity = lerp(.62, .42 + heartbeat * .12, progress);
+    this.cityMoonLight.color.lerpColors(
+      this.cityBaseMoonColor,
+      this.cityBioMoonColor,
+      progress
+    );
+    this.cityMoonLight.intensity = lerp(1.28, .72 + deepPulse * .2, progress);
+    this.cityLampMaterial.color.lerpColors(this.cityBaseLampColor, this.cityBioLampColor, progress * .78);
+    if (this.cityStars) this.cityStars.material.opacity = lerp(.62, .06, progress);
+
+    this.cityBuildingMaterials.forEach((material, index) => {
+      material.color.lerpColors(
+        material.userData.cityBaseColor,
+        this.cityBioBuildingColors[index],
+        progress
+      );
+      material.emissive.lerpColors(
+        material.userData.cityBaseEmissive,
+        this.cityBioBuildingEmissives[index],
+        progress
+      );
+      material.emissiveIntensity = lerp(
+        material.userData.cityBaseEmissiveIntensity,
+        1.18 + heartbeat * .62,
+        progress
+      );
+      material.roughness = lerp(.78, .47 + deepPulse * .06, progress);
+      material.metalness = lerp(.14, .025, progress);
+      material.bumpScale = progress * (.13 + heartbeat * .055);
+    });
+
+    this.cityAsphaltMaterial.color.lerpColors(
+      this.cityAsphaltMaterial.userData.cityBaseColor,
+      this.cityBioAsphaltColor,
+      progress
+    );
+    this.cityAsphaltMaterial.bumpScale = lerp(.19, .42 + heartbeat * .07, progress);
+    this.cityAsphaltMaterial.roughness = lerp(.78, .5 + deepPulse * .07, progress);
+    this.cityPavementMaterial.color.lerpColors(
+      this.cityPavementMaterial.userData.cityBaseColor,
+      this.cityBioPavementColor,
+      progress
+    );
+    this.cityPavementMaterial.bumpScale = lerp(.085, .24 + heartbeat * .04, progress);
+
+    const groundReveal = clamp((progress - .035) / .34, 0, 1);
+    const veinReveal = clamp((progress - .1) / .34, 0, 1);
+    const fleshReveal = clamp((progress - .2) / .46, 0, 1);
+    const membraneReveal = clamp((progress - .15) / .42, 0, 1);
+    const boneReveal = clamp((progress - .48) / .4, 0, 1);
+    this.cityBioGroundMaterial.opacity = groundReveal * .88;
+    this.cityVeinMaterial.opacity = veinReveal * .96;
+    this.cityVeinMaterial.emissiveIntensity = 1.05 + heartbeat * 1.15;
+    this.cityCapillaryMaterial.opacity = veinReveal * (.46 + heartbeat * .28);
+    this.cityFleshMaterial.opacity = fleshReveal * .98;
+    this.cityFleshMaterial.clearcoat = .2 + heartbeat * .18;
+    this.cityMembraneMaterial.opacity = membraneReveal * .78;
+    this.cityLivingWindowMaterial.opacity = membraneReveal * .94;
+    this.cityLivingWindowMaterial.emissiveIntensity = .72 + heartbeat * 1.45;
+    this.cityBoneMaterial.opacity = boneReveal * .86;
+
+    this.cityChunks.forEach((chunk) => {
+      const bioGroup = chunk.userData.bioGroup;
+      if (!bioGroup) return;
+      const distanceX = chunk.position.x - this.freeCameraPosition.x;
+      const distanceZ = chunk.position.z - this.freeCameraPosition.z;
+      const nearby = distanceX * distanceX + distanceZ * distanceZ < 128 * 128;
+      bioGroup.visible = progress > .002 && nearby;
+      if (!bioGroup.visible) return;
+      chunk.userData.bioPulseMeshes.forEach((mesh) => {
+        const threshold = mesh.userData.bioThreshold;
+        const revealRaw = clamp((progress - threshold) / .2, 0, 1);
+        const reveal = revealRaw * revealRaw * (3 - 2 * revealRaw);
+        mesh.visible = reveal > .002;
+        if (!mesh.visible) return;
+        const base = mesh.userData.bioBaseScale;
+        const pulseAmount = mesh.userData.bioPulseAmount;
+        const pulse = 1 + Math.sin(this.elapsed * 1.72 + mesh.userData.bioPulsePhase)
+          * pulseAmount * progress * reveal;
+        const softVerticalPulse = 1 + (pulse - 1) * .42;
+        mesh.scale.set(
+          base.x * reveal * pulse,
+          base.y * reveal * softVerticalPulse,
+          base.z * reveal * pulse
+        );
+      });
+    });
+  }
+
   updateEndlessCity() {
     if (!this.cityChunks?.length) return;
     const span = this.cityChunkSize * this.cityChunkGrid;
@@ -2589,6 +2989,9 @@ class PrivateRoom {
     this.cityLanded = false;
     this.cityLandingTime = 0;
     this.cityImpactPlayed = false;
+    this.cityTravelDistance = 0;
+    this.cityBiomechProgress = 0;
+    this.cityBiomechTarget = 0;
     this.scene.visible = false;
     this.renderer.shadowMap.enabled = true;
     this.camera.near = .1;
@@ -2666,9 +3069,13 @@ class PrivateRoom {
     if (this.freeCameraKeys.has("KeyD")) input.add(right);
     if (this.freeCameraKeys.has("KeyA")) input.sub(right);
     const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
+    const forwardIntent = input.lengthSq() > 0
+      && input.clone().normalize().dot(forward) > .55;
     const desired = input.lengthSq() ? input.normalize().multiplyScalar(running ? 6.2 : 3.5) : input;
     this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 10, delta);
     this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 10, delta);
+    const previousCityX = this.freeCameraPosition.x;
+    const previousCityZ = this.freeCameraPosition.z;
     const nextCityX = this.freeCameraPosition.x + this.freeCameraVelocity.x * delta;
     const nextCityZ = this.freeCameraPosition.z + this.freeCameraVelocity.z * delta;
     if (!this.isCityWalkBlocked(nextCityX, this.freeCameraPosition.z)) {
@@ -2681,6 +3088,11 @@ class PrivateRoom {
     } else {
       this.freeCameraVelocity.z = 0;
     }
+    const actualCityMovement = Math.hypot(
+      this.freeCameraPosition.x - previousCityX,
+      this.freeCameraPosition.z - previousCityZ
+    );
+    if (forwardIntent) this.cityTravelDistance += actualCityMovement;
     this.updateEndlessCity();
     this.camera.position.copy(this.freeCameraPosition);
     this.camera.position.y = 3.6 + Math.sin(this.elapsed * (running ? 9 : 6.5)) * Math.min(.045, desired.length() * .012);
@@ -3938,6 +4350,7 @@ class PrivateRoom {
 
   updateEffects(delta) {
     if (this.cityMode) {
+      this.updateCityBiomech(delta);
       const cityTheme = this.themeDefinitions[this.activeTheme];
       if (!this.reduceMotion && this.elapsed > this.nextGlitch) {
         this.glitch = this.activeTheme === "fever" ? 1 : random(.42, .78);
