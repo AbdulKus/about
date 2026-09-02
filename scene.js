@@ -5,7 +5,7 @@ import {
   SKY_MEADOW_TIMING,
   SKY_NOISE_GLSL,
   sampleSkyMeadowHeight
-} from "./sky-meadow.js?v=3";
+} from "./sky-meadow.js?v=4";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, amount) => a + (b - a) * amount;
@@ -1640,7 +1640,7 @@ class PrivateRoom {
             float cloudOpacity = 1.0 - transmittance;
             if (cloudOpacity < .006) discard;
             vec3 foregroundCloud = scattering / max(cloudOpacity, .001);
-            gl_FragColor = vec4(clamp(foregroundCloud, 0.0, 1.12), cloudOpacity * .76);
+            gl_FragColor = vec4(clamp(foregroundCloud, 0.0, 1.12), cloudOpacity * .91);
             return;
           }
 
@@ -1745,6 +1745,7 @@ class PrivateRoom {
           float turf = meadowFbm(vWorldXZ * .115 + vec2(-17.0, 29.0));
           float micro = meadowNoise(vWorldXZ * .43 + vec2(turf * 5.1, -turf * 3.7));
           float grain = meadowNoise(vWorldXZ * 1.08 + vec2(41.0, -12.0));
+          float distanceToCamera = distance(cameraPosition, vWorldPosition);
           vec3 deepGreen = vec3(.075, .245, .055);
           vec3 freshGreen = vec3(.245, .49, .105);
           vec3 sunGreen = vec3(.42, .61, .16);
@@ -1756,18 +1757,33 @@ class PrivateRoom {
           soil *= .28 + (1.0 - moss) * .34;
           albedo = mix(albedo, warmSoil, soil * .2);
           albedo += (grain - .5) * vec3(.035, .05, .012);
+
+          // Fine upright strokes keep the ground itself grassy even between 3D blades.
+          // They fade before they can turn into distant screen-space noise.
+          vec2 tinyGrid = vWorldXZ * 2.15;
+          vec2 tinyCell = fract(tinyGrid);
+          vec2 tinyIndex = floor(tinyGrid);
+          float tinySeed = meadowHash(tinyIndex);
+          float tinyLean = mix(-.24, .24, meadowHash(tinyIndex + vec2(17.0, 9.0)));
+          float tinyCenter = .16 + tinySeed * .68 + (tinyCell.y - .5) * tinyLean;
+          float tinyBlade = 1.0 - smoothstep(.025, .082, abs(tinyCell.x - tinyCenter));
+          tinyBlade *= smoothstep(.02, .16, tinyCell.y) * (1.0 - smoothstep(.62, .98, tinyCell.y));
+          vec2 shortGrid = vWorldXZ * 3.55 + vec2(7.3, 19.1);
+          vec2 shortCell = fract(shortGrid);
+          float shortCenter = .14 + meadowHash(floor(shortGrid)) * .72;
+          float shortBlade = 1.0 - smoothstep(.018, .065, abs(shortCell.x - shortCenter));
+          shortBlade *= smoothstep(.02, .15, shortCell.y) * (1.0 - smoothstep(.42, .8, shortCell.y));
+          float tinyBladeFade = 1.0 - smoothstep(82.0, 205.0, distanceToCamera);
+          albedo += vec3(.095, .17, .032) * (tinyBlade * .26 + shortBlade * .13) * tinyBladeFade;
+          albedo -= vec3(.025, .045, .012) * (1.0 - tinyBlade) * tinyBladeFade * .11;
           vec3 sunDirection = normalize(vec3(-.42, .83, .36));
           float sunlight = max(dot(normalize(vWorldNormal), sunDirection), 0.0);
           float soft = .58 + sunlight * .42;
           float slopeShade = mix(.68, 1.08, smoothstep(.7, 1.0, vWorldNormal.y));
           vec3 color = albedo * soft * slopeShade;
           color += vec3(.22, .24, .08) * pow(sunlight, 5.0) * .14;
-          float distanceToCamera = distance(cameraPosition, vWorldPosition);
           float fog = smoothstep(170.0, 390.0, distanceToCamera);
           color = mix(color, vec3(.79, .89, .93), fog);
-          float dither = meadowHash(floor(gl_FragCoord.xy) + floor(uTime * 3.0));
-          float horizonFade = 1.0 - smoothstep(315.0, 375.0, distanceToCamera);
-          if (dither > uOpacity * horizonFade) discard;
           gl_FragColor = vec4(color, 1.0);
         }
       `,
@@ -1829,6 +1845,8 @@ class PrivateRoom {
     mediumGrassBaseGeometry.setDrawRange(0, 18 * 3);
     const farGrassBaseGeometry = grassBaseGeometry.clone();
     farGrassBaseGeometry.setDrawRange(0, 18);
+    const ultraGrassBaseGeometry = grassBaseGeometry.clone();
+    ultraGrassBaseGeometry.setDrawRange(0, 18);
 
     const grassMaterial = new THREE.ShaderMaterial({
       uniforms: {
@@ -1848,7 +1866,6 @@ class PrivateRoom {
         varying float vTint;
         varying float vBladeTone;
         varying float vFog;
-        varying float vDistanceFade;
         ${hillFunctionGlsl}
         void main() {
           vec4 center = modelMatrix * vec4(aOffset.x, 0.0, aOffset.y, 1.0);
@@ -1870,10 +1887,7 @@ class PrivateRoom {
           vHeight = uv.y;
           vTint = aTint;
           vBladeTone = aBladeTone;
-          vFog = smoothstep(158.0, 395.0, distanceToCamera);
-          vDistanceFade = aLod < 1.5
-            ? 1.0
-            : 1.0 - smoothstep(338.0, 412.0, distanceToCamera);
+          vFog = smoothstep(175.0 + aLod * 18.0, 425.0, distanceToCamera);
         }
       `,
       fragmentShader: `
@@ -1883,10 +1897,7 @@ class PrivateRoom {
         varying float vTint;
         varying float vBladeTone;
         varying float vFog;
-        varying float vDistanceFade;
         void main() {
-          float dither = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
-          if (dither > uOpacity * vDistanceFade) discard;
           vec3 root = vec3(.04, .17, .03);
           vec3 tip = vec3(.36, .65, .14);
           vec3 color = mix(root, tip, smoothstep(0.0, 1.0, vHeight));
@@ -1921,9 +1932,17 @@ class PrivateRoom {
       };
       const grid = Math.ceil(Math.sqrt(count));
       const cell = this.skyMeadowTileSize / grid;
+      const cells = Array.from({ length: grid * grid }, (_, index) => index);
+      for (let index = cells.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(seeded() * (index + 1));
+        const held = cells[index];
+        cells[index] = cells[swapIndex];
+        cells[swapIndex] = held;
+      }
       for (let index = 0; index < count; index += 1) {
-        const column = index % grid;
-        const row = Math.floor(index / grid);
+        const cellIndex = cells[index];
+        const column = cellIndex % grid;
+        const row = Math.floor(cellIndex / grid);
         offsets[index * 2] = -this.skyMeadowTileSize * .5 + (column + .15 + seeded() * .7) * cell;
         offsets[index * 2 + 1] = -this.skyMeadowTileSize * .5 + (row + .15 + seeded() * .7) * cell;
         scales[index] = .68 + seeded() * .65;
@@ -2019,7 +2038,6 @@ class PrivateRoom {
         varying float vPart;
         varying float vTone;
         varying float vFog;
-        varying float vDistanceFade;
         ${hillFunctionGlsl}
         void main() {
           vec4 center = modelMatrix * vec4(aOffset.x, 0.0, aOffset.y, 1.0);
@@ -2040,7 +2058,6 @@ class PrivateRoom {
           vPart = aFlowerPart;
           vTone = aFlowerTone;
           vFog = smoothstep(92.0, 145.0, distanceToCamera);
-          vDistanceFade = 1.0 - smoothstep(112.0, 148.0, distanceToCamera);
         }
       `,
       fragmentShader: `
@@ -2050,10 +2067,7 @@ class PrivateRoom {
         varying float vPart;
         varying float vTone;
         varying float vFog;
-        varying float vDistanceFade;
         void main() {
-          float dither = fract(sin(dot(floor(gl_FragCoord.xy), vec2(41.31, 17.17))) * 9137.17);
-          if (dither > uOpacity * vDistanceFade) discard;
           vec3 stem = vec3(.07, .31, .055);
           vec3 petals = vColor * vTone;
           vec3 center = vec3(1.0, .62, .055) * vTone;
@@ -2109,27 +2123,29 @@ class PrivateRoom {
     this.skyMeadowFlowerMaterial = flowerMaterial;
     this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
 
-    const nearGrassCount = this.isTouch ? 3000 : 7600;
-    const mediumGrassCount = this.isTouch ? 1700 : 4100;
-    const farGrassCount = this.isTouch ? 900 : 2300;
-    const flowerCount = this.isTouch ? 140 : 340;
+    const nearGrassCount = this.isTouch ? 1200 : 2900;
+    const mediumGrassCount = this.isTouch ? 1650 : 3800;
+    const farGrassCount = this.isTouch ? 2300 : 5200;
+    const ultraGrassCount = this.isTouch ? 1600 : 3600;
+    const flowerCount = this.isTouch ? 56 : 140;
     this.skyMeadowGrassGeometrySets = [
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(nearGrassCount, index, grassBaseGeometry, 0)),
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(mediumGrassCount, index + 11, mediumGrassBaseGeometry, 1)),
-      Array.from({ length: 3 }, (_, index) => createGrassGeometry(farGrassCount, index + 23, farGrassBaseGeometry, 2))
+      Array.from({ length: 3 }, (_, index) => createGrassGeometry(farGrassCount, index + 23, farGrassBaseGeometry, 2)),
+      Array.from({ length: 3 }, (_, index) => createGrassGeometry(ultraGrassCount, index + 37, ultraGrassBaseGeometry, 3))
     ];
     const flowerGeometries = Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCount, index));
-    this.skyMeadowTileRadius = 3;
+    this.skyMeadowTileRadius = 5;
     this.skyMeadowTiles = [];
     const meadowTileCount = (this.skyMeadowTileRadius * 2 + 1) ** 2;
     for (let tile = 0; tile < meadowTileCount; tile += 1) {
-      const grass = new THREE.Mesh(this.skyMeadowGrassGeometrySets[2][tile % 3], grassMaterial);
+      const grass = new THREE.Mesh(this.skyMeadowGrassGeometrySets[3][tile % 3], grassMaterial);
       const flowers = new THREE.Mesh(flowerGeometries[(tile * 2) % flowerGeometries.length], flowerMaterial);
       flowers.visible = false;
       grass.renderOrder = 2;
       flowers.renderOrder = 3;
       this.skyMeadowRoot.add(grass, flowers);
-      this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null, lod: 2 });
+      this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null, lod: 3 });
     }
 
     const woodCanvas = document.createElement("canvas");
@@ -2228,6 +2244,10 @@ class PrivateRoom {
       metalness: .9
     });
     this.skyDoorMaterials.push(doorMaterial, panelMaterial, frameMaterial, brassMaterial);
+    this.skyDoorMaterials.forEach((material) => {
+      material.transparent = true;
+      material.opacity = 0;
+    });
 
     const doorShape = new THREE.Shape();
     doorShape.moveTo(-1.82, 0);
@@ -2315,6 +2335,69 @@ class PrivateRoom {
     this.skyDoorLight = new THREE.PointLight(0xffd98a, 0, 28, 1.8);
     this.skyDoorLight.position.set(0, 4.4, 1.2);
     this.skyDoorRoot.add(this.skyDoorLight);
+
+    const mushroomTextureCanvas = document.createElement("canvas");
+    mushroomTextureCanvas.width = mushroomTextureCanvas.height = 256;
+    const mushroomTextureContext = mushroomTextureCanvas.getContext("2d");
+    mushroomTextureContext.fillStyle = "#bd261c";
+    mushroomTextureContext.fillRect(0, 0, 256, 256);
+    mushroomTextureContext.fillStyle = "#fff6dc";
+    [
+      [34, 42, 13], [98, 27, 10], [172, 51, 15], [225, 30, 9],
+      [63, 116, 17], [143, 104, 11], [215, 135, 16], [25, 190, 10],
+      [112, 205, 15], [188, 218, 9]
+    ].forEach(([x, y, radius]) => {
+      mushroomTextureContext.beginPath();
+      mushroomTextureContext.arc(x, y, radius, 0, Math.PI * 2);
+      mushroomTextureContext.fill();
+    });
+    const mushroomTexture = new THREE.CanvasTexture(mushroomTextureCanvas);
+    mushroomTexture.colorSpace = THREE.SRGBColorSpace;
+    mushroomTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    mushroomTexture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
+
+    const mushroomLimit = 18;
+    const mushroomStemMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf2e5c7,
+      roughness: .82
+    });
+    const mushroomWhiteMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfff4d8,
+      roughness: .76
+    });
+    const mushroomRedMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: mushroomTexture,
+      roughness: .7
+    });
+    const mushroomStemGeometry = new THREE.CylinderGeometry(.075, .115, .52, 8, 2);
+    const mushroomCapGeometry = new THREE.SphereGeometry(.34, 12, 7, 0, Math.PI * 2, 0, Math.PI * .5);
+    this.skyMushroomStems = new THREE.InstancedMesh(
+      mushroomStemGeometry,
+      mushroomStemMaterial,
+      mushroomLimit
+    );
+    this.skyMushroomWhiteCaps = new THREE.InstancedMesh(
+      mushroomCapGeometry,
+      mushroomWhiteMaterial,
+      mushroomLimit
+    );
+    this.skyMushroomRedCaps = new THREE.InstancedMesh(
+      mushroomCapGeometry,
+      mushroomRedMaterial,
+      mushroomLimit
+    );
+    this.skyMushroomGroup = new THREE.Group();
+    this.skyMushroomGroup.visible = false;
+    [this.skyMushroomStems, this.skyMushroomWhiteCaps, this.skyMushroomRedCaps].forEach((mesh) => {
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 4;
+      this.skyMushroomGroup.add(mesh);
+    });
+    this.skyMeadowRoot.add(this.skyMushroomGroup);
+    this.skyMushroomDummy = new THREE.Object3D();
+    this.skyMushroomLimit = mushroomLimit;
 
     const makeWing = (side, lower) => {
       const shape = new THREE.Shape();
@@ -2529,6 +2612,7 @@ class PrivateRoom {
     this.skyMeadowRoot.visible = true;
     if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
     if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
+    if (this.skyMushroomGroup) this.skyMushroomGroup.visible = false;
     this.skyMeadowCameraY = this.skyBaseY;
     this.skyMeadowBaseY = this.skyBaseY
       - this.freeEyeHeight
@@ -2553,8 +2637,8 @@ class PrivateRoom {
         const tileX = centerX + offsetX;
         const tileZ = centerZ + offsetZ;
         const key = tileX + ":" + tileZ;
-        const ring = Math.max(Math.abs(offsetX), Math.abs(offsetZ));
-        const lod = ring <= 1 ? 0 : ring === 2 ? 1 : 2;
+        const radial = Math.hypot(offsetX, offsetZ);
+        const lod = radial <= 1.65 ? 0 : radial <= 3.2 ? 1 : radial <= 4.5 ? 2 : 3;
         desired.push({ tileX, tileZ, key, lod });
         desiredKeys.add(key);
       }
@@ -2584,15 +2668,70 @@ class PrivateRoom {
     });
   }
 
+  placeSkyMushroomTrail(startX, startZ, doorX, doorZ) {
+    if (!this.skyMushroomGroup) return;
+    const deltaX = doorX - startX;
+    const deltaZ = doorZ - startZ;
+    const distance = Math.hypot(deltaX, deltaZ);
+    if (distance < 1) return;
+    const directionX = deltaX / distance;
+    const directionZ = deltaZ / distance;
+    const perpendicularX = -directionZ;
+    const perpendicularZ = directionX;
+    const count = clamp(Math.floor(distance / 23), 6, this.skyMushroomLimit);
+    const dummy = this.skyMushroomDummy;
+    let whiteCount = 0;
+    let redCount = 0;
+
+    for (let index = 0; index < count; index += 1) {
+      const fraction = (index + 1) / (count + 1);
+      const wander = Math.sin(index * 2.37 + 1.1) * (5.2 + (index % 3) * 1.25);
+      const longitudinalJitter = Math.sin(index * 4.91) * 2.2;
+      const x = startX + directionX * (distance * fraction + longitudinalJitter) + perpendicularX * wander;
+      const z = startZ + directionZ * (distance * fraction + longitudinalJitter) + perpendicularZ * wander;
+      const groundY = this.skyMeadowHeightWorld(x, z);
+      const scale = .78 + ((index * 37) % 9) * .055;
+      const rotation = (index * 2.17) % (Math.PI * 2);
+
+      dummy.position.set(x, groundY + .26 * scale, z);
+      dummy.rotation.set(0, rotation, 0);
+      dummy.scale.set(scale, scale, scale);
+      dummy.updateMatrix();
+      this.skyMushroomStems.setMatrixAt(index, dummy.matrix);
+
+      dummy.position.set(x, groundY + .5 * scale, z);
+      dummy.rotation.set(0, rotation, 0);
+      dummy.scale.set(scale * 1.04, scale * .62, scale * 1.04);
+      dummy.updateMatrix();
+      if (index % 3 === 1) {
+        this.skyMushroomRedCaps.setMatrixAt(redCount, dummy.matrix);
+        redCount += 1;
+      } else {
+        this.skyMushroomWhiteCaps.setMatrixAt(whiteCount, dummy.matrix);
+        whiteCount += 1;
+      }
+    }
+
+    this.skyMushroomStems.count = count;
+    this.skyMushroomWhiteCaps.count = whiteCount;
+    this.skyMushroomRedCaps.count = redCount;
+    this.skyMushroomStems.instanceMatrix.needsUpdate = true;
+    this.skyMushroomWhiteCaps.instanceMatrix.needsUpdate = true;
+    this.skyMushroomRedCaps.instanceMatrix.needsUpdate = true;
+    this.skyMushroomGroup.visible = true;
+  }
+
   spawnSkyDoor() {
-    if (this.skyDoorSpawned || !this.skyDoorRoot || !this.skyMeadowGrounded) return;
+    if (this.skyDoorSpawned || !this.skyDoorRoot) return;
     this.skyDoorSpawned = true;
     this.skyDoorReveal = 0;
     const direction = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
     this.skyMeadowDirection.copy(direction);
-    let crestDistance = 72;
+    const trailStartX = this.freeCameraPosition.x;
+    const trailStartZ = this.freeCameraPosition.z;
+    let crestDistance = 150;
     let crestHeight = Number.NEGATIVE_INFINITY;
-    for (let distance = 62; distance <= 138; distance += 3) {
+    for (let distance = 120; distance <= 240; distance += 4) {
       const x = this.freeCameraPosition.x + direction.x * distance;
       const z = this.freeCameraPosition.z + direction.z * distance;
       const height = this.skyMeadowHeightWorld(x, z);
@@ -2601,9 +2740,9 @@ class PrivateRoom {
         crestDistance = distance;
       }
     }
-    let doorDistance = crestDistance + 24;
+    let doorDistance = crestDistance + 42;
     let shelteredHeight = Number.POSITIVE_INFINITY;
-    for (let distance = crestDistance + 18; distance <= crestDistance + 44; distance += 2) {
+    for (let distance = crestDistance + 28; distance <= crestDistance + 70; distance += 3) {
       const x = this.freeCameraPosition.x + direction.x * distance;
       const z = this.freeCameraPosition.z + direction.z * distance;
       const height = this.skyMeadowHeightWorld(x, z);
@@ -2612,7 +2751,7 @@ class PrivateRoom {
         doorDistance = distance;
       }
     }
-    doorDistance = clamp(doorDistance, 86, 176);
+    doorDistance = clamp(doorDistance, 175, 300);
     const doorX = this.freeCameraPosition.x + direction.x * doorDistance;
     const doorZ = this.freeCameraPosition.z + direction.z * doorDistance;
     this.skyDoorRoot.position.set(
@@ -2623,6 +2762,7 @@ class PrivateRoom {
     this.skyDoorRoot.rotation.y = Math.atan2(direction.x, direction.z);
     this.skyDoorRoot.visible = true;
     this.skyButterflyGroup.visible = true;
+    this.placeSkyMushroomTrail(trailStartX, trailStartZ, doorX, doorZ);
   }
 
   updateSkyButterflies() {
@@ -2703,10 +2843,13 @@ class PrivateRoom {
       0,
       1
     );
-    const progress = this.skyMeadowProgress;
+    const rawProgress = this.skyMeadowProgress;
+    const progress = clamp(rawProgress - .12 * rawProgress * (1 - rawProgress), 0, 1);
     const contactBaseY = this.skyBaseY
       - this.freeEyeHeight
       - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
+
+    if (rawProgress >= .55 && !this.skyDoorSpawned) this.spawnSkyDoor();
 
     if (!this.skyMeadowGrounded) {
       this.skyMeadowBaseY = damp(this.skyMeadowBaseY, contactBaseY, .62, delta);
@@ -2817,6 +2960,7 @@ class PrivateRoom {
     if (this.skyMeadowRoot) this.skyMeadowRoot.visible = false;
     if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
     if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
+    if (this.skyMushroomGroup) this.skyMushroomGroup.visible = false;
     if (this.skyMeadowTerrainMaterial) this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowGrassMaterial) this.skyMeadowGrassMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowFlowerMaterial) this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = 0;
@@ -2853,9 +2997,11 @@ class PrivateRoom {
       this.skyMeadowRoot.visible = true;
       if (this.skyDoorRoot) this.skyDoorRoot.visible = true;
       if (this.skyButterflyGroup) this.skyButterflyGroup.visible = true;
+      if (this.skyMushroomGroup) this.skyMushroomGroup.visible = true;
       this.renderer.compile(this.skyMeadowScene, this.camera);
       if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
       if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
+      if (this.skyMushroomGroup) this.skyMushroomGroup.visible = false;
       this.skyMeadowRoot.visible = false;
       this.skyMeadowCompiled = true;
     }
@@ -6104,21 +6250,25 @@ class PrivateRoom {
     rail.stop(now + 1.3);
   }
 
-  playFootstep(running) {
+  playFootstep(running, meadow = false) {
     const context = this.audioContext;
     if (!context || !this.footstepBuffer || context.state !== "running") return;
     const now = context.currentTime;
     const source = context.createBufferSource();
     source.buffer = this.footstepBuffer;
-    source.playbackRate.value = random(running ? 1.08 : .86, running ? 1.28 : 1.08);
+    source.playbackRate.value = meadow
+      ? random(running ? 1.32 : 1.12, running ? 1.58 : 1.42)
+      : random(running ? 1.08 : .86, running ? 1.28 : 1.08);
 
     const filter = context.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.value = random(running ? 520 : 390, running ? 760 : 590);
+    filter.frequency.value = meadow
+      ? random(running ? 1250 : 980, running ? 1850 : 1560)
+      : random(running ? 520 : 390, running ? 760 : 590);
     filter.Q.value = .7;
 
     const gain = context.createGain();
-    const volume = running ? .26 : .19;
+    const volume = meadow ? (running ? .29 : .23) : (running ? .26 : .19);
     gain.gain.setValueAtTime(.0001, now);
     gain.gain.exponentialRampToValueAtTime(volume, now + .008);
     gain.gain.exponentialRampToValueAtTime(.0001, now + .14);
@@ -6127,6 +6277,25 @@ class PrivateRoom {
     gain.connect(this.audioMaster);
     source.start(now);
     source.stop(now + .16);
+
+    if (meadow) {
+      const rustle = context.createBufferSource();
+      rustle.buffer = this.footstepBuffer;
+      rustle.playbackRate.value = random(1.65, 2.15);
+      const rustleFilter = context.createBiquadFilter();
+      rustleFilter.type = "bandpass";
+      rustleFilter.frequency.value = random(1900, 2850);
+      rustleFilter.Q.value = .55;
+      const rustleGain = context.createGain();
+      rustleGain.gain.setValueAtTime(.0001, now);
+      rustleGain.gain.exponentialRampToValueAtTime(running ? .105 : .082, now + .014);
+      rustleGain.gain.exponentialRampToValueAtTime(.0001, now + .19);
+      rustle.connect(rustleFilter);
+      rustleFilter.connect(rustleGain);
+      rustleGain.connect(this.audioMaster);
+      rustle.start(now + .006);
+      rustle.stop(now + .21);
+    }
 
     const thump = context.createOscillator();
     const thumpGain = context.createGain();
@@ -6220,7 +6389,7 @@ class PrivateRoom {
     const footstepIndex = Math.floor(this.walkPhase / (Math.PI * 1.22));
     if (movingOnGround && footstepIndex !== this.lastFootstepIndex) {
       this.lastFootstepIndex = footstepIndex;
-      this.playFootstep(running);
+      this.playFootstep(running, skyOnGround);
     } else if (!movingOnGround) {
       this.lastFootstepIndex = footstepIndex;
     }

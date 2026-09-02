@@ -1,12 +1,12 @@
 export const SKY_MEADOW_TIMING = Object.freeze({
   startDelay: 90,
-  riseDuration: 300,
-  doorDelay: 90
+  riseDuration: 210,
+  doorDelay: 8
 });
 
 export const SKY_MEADOW_SETTINGS = Object.freeze({
   contactDepth: 38,
-  tileSize: 104,
+  tileSize: 64,
   terrainSize: 720
 });
 
