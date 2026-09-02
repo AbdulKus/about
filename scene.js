@@ -64,6 +64,38 @@ class PrivateRoom {
     this.cityTravelDistance = 0;
     this.cityBiomechProgress = 0;
     this.cityBiomechTarget = 0;
+    this.cityForwardTime = 0;
+    this.cityEmojiSpawned = false;
+    this.cityEmojiHits = 0;
+    this.cityEmojiMaxHits = 5;
+    this.cityEmojiPromptActive = false;
+    this.cityEmojiHitCooldown = 0;
+    this.cityEmojiShake = 0;
+    this.cityEmojiDeathTime = 0;
+    this.cityFinaleState = "dormant";
+    this.cityFinaleLocksMovement = false;
+    this.cityInfectedSymbolMeshes = [];
+    this.locationMenuKDown = false;
+    this.locationMenuHold = 0;
+    this.locationMenuOpen = false;
+    this.locationMenuIndex = 0;
+    this.locationStages = [
+      { id: "start", label: "Стартовая комната" },
+      { id: "corridor", label: "Коридор перед шторами" },
+      { id: "junction", label: "Развилка за шторами" },
+      { id: "right", label: "Правый конец коридора" },
+      { id: "fall", label: "Провал пола" },
+      { id: "left", label: "Левый глитч-коридор" },
+      { id: "stairs", label: "Лестница наверх" },
+      { id: "white-room", label: "Белая комната" },
+      { id: "sky", label: "Небо" },
+      { id: "city", label: "Город" },
+      { id: "mutation", label: "Поздняя биомутация" },
+      { id: "emoji", label: "Смайл на перекрёстке" },
+      { id: "flood", label: "Начало потопа" },
+      { id: "flood-peak", label: "Пик потопа" },
+      { id: "black", label: "Конец потопа" }
+    ];
     this.skyTransition = 0;
     this.skyWhiteHold = .85;
     this.skyTransitionDuration = 3.25;
@@ -2302,21 +2334,26 @@ class PrivateRoom {
     this.cityBaseLampColor = this.cityLampMaterial.color.clone();
     this.cityBioLampColor = new THREE.Color(0xff6a62);
     const symbolAtlasCanvas = document.createElement("canvas");
-    symbolAtlasCanvas.width = symbolAtlasCanvas.height = 512;
+    symbolAtlasCanvas.width = 1024;
+    symbolAtlasCanvas.height = 512;
     const symbolAtlasContext = symbolAtlasCanvas.getContext("2d");
     const strangeSymbols = [
       "ꙮ", "⟁", "⌬", "⍜",
       "ᛉ", "ᚼ", "Ѯ", "҂",
       "∴", "⊘", "☿", "⛧",
-      "⟟", "⌁", "⧖", "※"
+      "⟟", "⌁", "⧖", "※",
+      "⸸", "⛥", "⟐", "⌇",
+      "⌖", "⧗", "⨳", "⥁",
+      "⫷", "⟡", "꩜", "⋇",
+      "⌭", "⍟", "⦿", "⧉"
     ];
     symbolAtlasContext.clearRect(0, 0, 512, 512);
     symbolAtlasContext.textAlign = "center";
     symbolAtlasContext.textBaseline = "middle";
     symbolAtlasContext.font = '700 78px "DejaVu Sans", "Segoe UI Symbol", serif';
     strangeSymbols.forEach((symbol, index) => {
-      const column = index % 4;
-      const row = Math.floor(index / 4);
+      const column = index % 8;
+      const row = Math.floor(index / 8);
       symbolAtlasContext.shadowColor = "rgba(255,255,255,.92)";
       symbolAtlasContext.shadowBlur = 14;
       symbolAtlasContext.fillStyle = "#fff";
@@ -2342,9 +2379,12 @@ class PrivateRoom {
         varying vec3 vSymbolColor;
         varying float vSymbolPhase;
         void main() {
-          float column = mod(aSymbol, 4.0);
-          float row = floor(aSymbol / 4.0);
-          vSymbolUv = (uv + vec2(column, 3.0 - row)) * .25;
+          float column = mod(aSymbol, 8.0);
+          float row = floor(aSymbol / 8.0);
+          vSymbolUv = vec2(
+            (uv.x + column) / 8.0,
+            (uv.y + 3.0 - row) / 4.0
+          );
           vSymbolColor = aSymbolColor;
           vSymbolPhase = aSymbol * .731;
           gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
@@ -2800,7 +2840,7 @@ class PrivateRoom {
             ),
             pulseAmount: .09,
             phase: seeded(sideSeed + glyphIndex + 613) * Math.PI * 2,
-            symbol: Math.floor(seeded(sideSeed + glyphIndex + 614) * 16),
+            symbol: Math.floor(seeded(sideSeed + glyphIndex + 614) * 32),
             color: glyphColor
           });
         }
@@ -3252,7 +3292,9 @@ class PrivateRoom {
   updateCityBiomech(delta) {
     const startDistance = 100;
     const mutationDistance = Math.max(0, this.cityTravelDistance - startDistance);
-    const endlessProgress = 1 - Math.exp(-mutationDistance / 650);
+    const endlessProgress = this.cityForwardTime >= 480
+      ? 1
+      : 1 - Math.exp(-mutationDistance / 650);
     this.cityBiomechTarget = endlessProgress;
     this.cityBiomechProgress = damp(this.cityBiomechProgress, endlessProgress, .82, delta);
     const progress = this.cityBiomechProgress;
@@ -3421,6 +3463,726 @@ class PrivateRoom {
     }
   }
 
+  createCitySymbolMesh(entries, material) {
+    if (!entries.length) return null;
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    const symbolIndices = new Float32Array(entries.length);
+    const symbolColors = new Float32Array(entries.length * 3);
+    entries.forEach((entry, index) => {
+      symbolIndices[index] = entry.symbol;
+      symbolColors[index * 3] = entry.color.r;
+      symbolColors[index * 3 + 1] = entry.color.g;
+      symbolColors[index * 3 + 2] = entry.color.b;
+    });
+    geometry.setAttribute("aSymbol", new THREE.InstancedBufferAttribute(symbolIndices, 1));
+    geometry.setAttribute("aSymbolColor", new THREE.InstancedBufferAttribute(symbolColors, 3));
+    const mesh = new THREE.InstancedMesh(geometry, material, entries.length);
+    entries.forEach((entry, index) => {
+      this.cityBioMatrixDummy.position.copy(entry.position);
+      this.cityBioMatrixDummy.quaternion.copy(entry.quaternion);
+      this.cityBioMatrixDummy.scale.copy(entry.scale);
+      this.cityBioMatrixDummy.updateMatrix();
+      mesh.setMatrixAt(index, this.cityBioMatrixDummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.frustumCulled = false;
+    return mesh;
+  }
+
+  drawCityEmoji(state = 0, bloodProgress = 0) {
+    if (!this.cityEmojiContext || !this.cityEmojiTexture) return;
+    const context = this.cityEmojiContext;
+    context.clearRect(0, 0, 256, 256);
+    context.save();
+    context.shadowColor = state === 5 ? "rgba(130,0,18,.72)" : "rgba(255,210,66,.65)";
+    context.shadowBlur = 18;
+
+    const faceGradient = context.createRadialGradient(104, 88, 12, 128, 128, 103);
+    if (state === 5) {
+      faceGradient.addColorStop(0, "#b5ad91");
+      faceGradient.addColorStop(.58, "#716c5e");
+      faceGradient.addColorStop(1, "#292722");
+    } else {
+      faceGradient.addColorStop(0, "#fff07d");
+      faceGradient.addColorStop(.52, "#f7bb28");
+      faceGradient.addColorStop(1, "#a85b12");
+    }
+    context.fillStyle = faceGradient;
+    context.beginPath();
+    context.arc(128, 128, 92, 0, Math.PI * 2);
+    context.fill();
+    context.shadowBlur = 0;
+    context.lineWidth = 5;
+    context.strokeStyle = state === 5 ? "#28221f" : "#744016";
+    context.stroke();
+
+    if (state === 5) {
+      context.strokeStyle = "#211a18";
+      context.lineWidth = 11;
+      [[88, 103], [168, 103]].forEach(([x, y]) => {
+        context.beginPath();
+        context.moveTo(x - 13, y - 13);
+        context.lineTo(x + 13, y + 13);
+        context.moveTo(x + 13, y - 13);
+        context.lineTo(x - 13, y + 13);
+        context.stroke();
+      });
+      context.lineWidth = 8;
+      context.beginPath();
+      context.moveTo(91, 177);
+      context.quadraticCurveTo(128, 163, 165, 177);
+      context.stroke();
+    } else {
+      context.fillStyle = "#4b2b18";
+      if (state >= 3) {
+        context.lineWidth = 8;
+        context.strokeStyle = "#4b2b18";
+        [[90, 105], [166, 105]].forEach(([x, y]) => {
+          context.beginPath();
+          context.arc(x, y + 7, 17, Math.PI * 1.12, Math.PI * 1.88);
+          context.stroke();
+        });
+      } else {
+        context.beginPath();
+        context.ellipse(91, 106, 10, state === 0 ? 16 : 12, 0, 0, Math.PI * 2);
+        context.ellipse(165, 106, 10, state === 0 ? 16 : 12, 0, 0, Math.PI * 2);
+        context.fill();
+      }
+
+      context.strokeStyle = "#5e3216";
+      context.lineWidth = 8;
+      context.lineCap = "round";
+      context.beginPath();
+      if (state === 0) {
+        context.moveTo(84, 181);
+        context.quadraticCurveTo(128, 141, 172, 181);
+      } else if (state === 1) {
+        context.moveTo(94, 170);
+        context.lineTo(162, 170);
+      } else if (state === 2) {
+        context.moveTo(91, 161);
+        context.quadraticCurveTo(128, 183, 165, 161);
+      } else if (state === 3) {
+        context.moveTo(82, 153);
+        context.quadraticCurveTo(128, 197, 174, 153);
+      } else {
+        context.moveTo(76, 148);
+        context.quadraticCurveTo(128, 207, 180, 148);
+      }
+      context.stroke();
+
+      if (state === 0) {
+        const tearGradient = context.createLinearGradient(0, 112, 0, 214);
+        tearGradient.addColorStop(0, "rgba(185,235,255,.98)");
+        tearGradient.addColorStop(1, "rgba(39,137,215,.35)");
+        context.fillStyle = tearGradient;
+        [[89, 113, -3], [167, 113, 3]].forEach(([x, y, bend]) => {
+          context.beginPath();
+          context.moveTo(x, y);
+          context.bezierCurveTo(x - 14 + bend, y + 35, x - 11 + bend, y + 78, x, y + 99);
+          context.bezierCurveTo(x + 15 + bend, y + 74, x + 16 + bend, y + 36, x, y);
+          context.fill();
+        });
+      }
+    }
+
+    if (bloodProgress > 0) {
+      context.save();
+      context.globalCompositeOperation = "source-over";
+      const drip = clamp(bloodProgress, 0, 1);
+      const bloodGradient = context.createLinearGradient(0, 32, 0, 230);
+      bloodGradient.addColorStop(0, "#7d0011");
+      bloodGradient.addColorStop(.55, "#bd0820");
+      bloodGradient.addColorStop(1, "#370006");
+      context.fillStyle = bloodGradient;
+      context.beginPath();
+      context.moveTo(55, 45);
+      context.bezierCurveTo(77, 31, 101, 42, 124, 34);
+      context.bezierCurveTo(154, 25, 176, 42, 200, 48);
+      context.lineTo(200, 62 + drip * 34);
+      context.bezierCurveTo(184, 54 + drip * 68, 175, 76 + drip * 78, 164, 62 + drip * 112);
+      context.bezierCurveTo(151, 86 + drip * 94, 137, 68 + drip * 138, 124, 59 + drip * 119);
+      context.bezierCurveTo(106, 77 + drip * 86, 91, 66 + drip * 122, 79, 58 + drip * 98);
+      context.bezierCurveTo(66, 72 + drip * 62, 59, 70 + drip * 44, 55, 45);
+      context.fill();
+      context.restore();
+    }
+    context.restore();
+    this.cityEmojiTexture.needsUpdate = true;
+  }
+
+  spawnCityEmoji() {
+    if (this.cityEmojiSpawned) return;
+    this.cityEmojiSpawned = true;
+    this.cityFinaleState = "emoji";
+    this.cityBiomechTarget = 1;
+    this.cityEmojiCanvas = document.createElement("canvas");
+    this.cityEmojiCanvas.width = this.cityEmojiCanvas.height = 256;
+    this.cityEmojiContext = this.cityEmojiCanvas.getContext("2d");
+    this.cityEmojiTexture = new THREE.CanvasTexture(this.cityEmojiCanvas);
+    this.cityEmojiTexture.colorSpace = THREE.SRGBColorSpace;
+    this.cityEmojiTexture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    this.drawCityEmoji(0, 0);
+
+    const direction = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
+    const cardinal = Math.abs(direction.x) > Math.abs(direction.z)
+      ? new THREE.Vector3(Math.sign(direction.x) || 1, 0, 0)
+      : new THREE.Vector3(0, 0, Math.sign(direction.z) || -1);
+    const candidate = this.freeCameraPosition.clone().addScaledVector(cardinal, 48);
+    let spawnX = Math.round(candidate.x / this.cityChunkSize) * this.cityChunkSize;
+    let spawnZ = Math.round(candidate.z / this.cityChunkSize) * this.cityChunkSize;
+    const towardSpawn = new THREE.Vector3(
+      spawnX - this.freeCameraPosition.x,
+      0,
+      spawnZ - this.freeCameraPosition.z
+    );
+    if (towardSpawn.dot(cardinal) < 20) {
+      spawnX += cardinal.x * this.cityChunkSize;
+      spawnZ += cardinal.z * this.cityChunkSize;
+    }
+    this.cityEmojiBasePosition = new THREE.Vector3(spawnX, 2.75, spawnZ);
+    this.cityEmojiSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.cityEmojiTexture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      toneMapped: false
+    }));
+    this.cityEmojiSprite.position.copy(this.cityEmojiBasePosition);
+    this.cityEmojiSprite.scale.set(5.1, 5.1, 1);
+    this.cityEmojiSprite.renderOrder = 12;
+    this.cityScene.add(this.cityEmojiSprite);
+
+    this.cityEmojiPrompt = document.createElement("button");
+    this.cityEmojiPrompt.type = "button";
+    this.cityEmojiPrompt.className = "door-prompt";
+    this.cityEmojiPrompt.setAttribute("data-overlay-ui", "");
+    this.cityEmojiPrompt.setAttribute("aria-hidden", "true");
+    const key = document.createElement("kbd");
+    key.textContent = "E";
+    const label = document.createElement("span");
+    label.textContent = "УДАРИТЬ";
+    this.cityEmojiPrompt.append(key, label);
+    this.cityEmojiPrompt.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.hitCityEmoji();
+    });
+    document.body.appendChild(this.cityEmojiPrompt);
+  }
+
+  updateCityEmojiPrompt() {
+    if (!this.cityEmojiPrompt || !this.cityEmojiSprite) return;
+    const toEmoji = this.cityEmojiSprite.position.clone().sub(this.camera.position);
+    const facing = toEmoji.clone().normalize().dot(
+      new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)
+    ) > .35;
+    const distance = toEmoji.length();
+    const active = this.cityFinaleState === "emoji"
+      && this.cityEmojiHitCooldown <= 0
+      && distance < 5.6
+      && facing;
+    this.cityEmojiPromptActive = active;
+    this.cityEmojiPrompt.classList.toggle("is-visible", active);
+    this.cityEmojiPrompt.setAttribute("aria-hidden", active ? "false" : "true");
+    if (!active) return;
+    const projected = this.cityEmojiSprite.position.clone().add(new THREE.Vector3(0, 2.7, 0)).project(this.camera);
+    this.cityEmojiPrompt.style.left = `${((projected.x * .5 + .5) * window.innerWidth).toFixed(1)}px`;
+    this.cityEmojiPrompt.style.top = `${((-projected.y * .5 + .5) * window.innerHeight).toFixed(1)}px`;
+  }
+
+  playCityStrike() {
+    const context = this.audioContext;
+    if (!context || !this.audioMaster || context.state !== "running") return;
+    const now = context.currentTime;
+    const impact = context.createOscillator();
+    const impactGain = context.createGain();
+    impact.type = "sine";
+    impact.frequency.setValueAtTime(104, now);
+    impact.frequency.exponentialRampToValueAtTime(27, now + .52);
+    impactGain.gain.setValueAtTime(.62, now);
+    impactGain.gain.exponentialRampToValueAtTime(.0001, now + .58);
+    impact.connect(impactGain);
+    impactGain.connect(this.audioMaster);
+    impact.start(now);
+    impact.stop(now + .6);
+
+    const crack = context.createOscillator();
+    const crackGain = context.createGain();
+    crack.type = "sawtooth";
+    crack.frequency.setValueAtTime(188, now);
+    crack.frequency.exponentialRampToValueAtTime(43, now + .18);
+    crackGain.gain.setValueAtTime(.21, now);
+    crackGain.gain.exponentialRampToValueAtTime(.0001, now + .25);
+    crack.connect(crackGain);
+    crackGain.connect(this.audioMaster);
+    crack.start(now);
+    crack.stop(now + .27);
+
+    if (this.footstepBuffer) {
+      const noise = context.createBufferSource();
+      const noiseFilter = context.createBiquadFilter();
+      const noiseGain = context.createGain();
+      noise.buffer = this.footstepBuffer;
+      noise.playbackRate.value = .42;
+      noiseFilter.type = "lowpass";
+      noiseFilter.frequency.value = 940;
+      noiseGain.gain.setValueAtTime(.48, now);
+      noiseGain.gain.exponentialRampToValueAtTime(.0001, now + .38);
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(this.audioMaster);
+      noise.start(now);
+    }
+  }
+
+  infectNearbyCityBuilding(hitIndex) {
+    if (!this.cityEmojiSprite) return;
+    const candidates = [];
+    this.cityChunks.forEach((chunk) => {
+      chunk.userData.bioBuildings?.forEach((record) => {
+        if (record.cityEmojiInfected) return;
+        const worldX = chunk.position.x + record.mesh.position.x;
+        const worldZ = chunk.position.z + record.mesh.position.z;
+        candidates.push({
+          chunk,
+          record,
+          distance: Math.hypot(
+            worldX - this.cityEmojiSprite.position.x,
+            worldZ - this.cityEmojiSprite.position.z
+          )
+        });
+      });
+    });
+    candidates.sort((a, b) => a.distance - b.distance);
+    const target = candidates[0];
+    if (!target) return;
+    target.record.cityEmojiInfected = true;
+
+    const entries = [];
+    const count = 76 + hitIndex * 42;
+    const seedBase = target.record.mesh.position.x * 3.17
+      + target.record.mesh.position.z * 7.31
+      + hitIndex * 91.7;
+    const seeded = (salt) => {
+      const value = Math.sin(seedBase + salt * 73.17) * 43758.5453;
+      return value - Math.floor(value);
+    };
+    for (let index = 0; index < count; index += 1) {
+      const side = index % 4;
+      const sideWidth = side < 2 ? target.record.width : target.record.depth;
+      const u = (seeded(index + 1) - .5) * sideWidth * .88;
+      const y = .9 + seeded(index + 2) * Math.max(3, target.record.height - 1.4);
+      let position;
+      let rotationY;
+      if (side === 0) {
+        position = new THREE.Vector3(target.record.mesh.position.x + u, y, target.record.mesh.position.z + target.record.depth * .505 + .08);
+        rotationY = 0;
+      } else if (side === 1) {
+        position = new THREE.Vector3(target.record.mesh.position.x - u, y, target.record.mesh.position.z - target.record.depth * .505 - .08);
+        rotationY = Math.PI;
+      } else if (side === 2) {
+        position = new THREE.Vector3(target.record.mesh.position.x + target.record.width * .505 + .08, y, target.record.mesh.position.z - u);
+        rotationY = Math.PI * .5;
+      } else {
+        position = new THREE.Vector3(target.record.mesh.position.x - target.record.width * .505 - .08, y, target.record.mesh.position.z + u);
+        rotationY = -Math.PI * .5;
+      }
+      entries.push({
+        position,
+        quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY),
+        scale: new THREE.Vector3(.45 + seeded(index + 3) * 1.1, .45 + seeded(index + 4) * 1.1, 1),
+        symbol: Math.floor(seeded(index + 5) * 32),
+        color: new THREE.Color().setHSL(seeded(index + 6), .94, .58 + seeded(index + 7) * .23)
+      });
+    }
+    const material = this.citySymbolMaterial.clone();
+    material.uniforms.uAtlas.value = this.citySymbolMaterial.uniforms.uAtlas.value;
+    material.uniforms.uOpacity.value = 1;
+    const mesh = this.createCitySymbolMesh(entries, material);
+    if (!mesh) return;
+    target.chunk.userData.bioGroup.add(mesh);
+    this.cityInfectedSymbolMeshes.push({
+      mesh,
+      material,
+      phase: seeded(999) * Math.PI * 2,
+      hitIndex
+    });
+  }
+
+  hitCityEmoji() {
+    if (!this.cityEmojiPromptActive
+      || this.cityEmojiHitCooldown > 0
+      || this.cityFinaleState !== "emoji") return;
+    this.ensureAudio();
+    this.cityEmojiHitCooldown = .82;
+    this.cityEmojiHits += 1;
+    this.cityEmojiShake = Math.min(1.8, 1.05 + this.cityEmojiHits * .13);
+    this.playCityStrike();
+    this.infectNearbyCityBuilding(this.cityEmojiHits);
+    if (this.cityEmojiHits >= this.cityEmojiMaxHits) {
+      this.cityFinaleState = "waiting";
+      this.cityEmojiDeathTime = 0;
+      this.drawCityEmoji(5, 0);
+      this.cityEmojiPromptActive = false;
+      this.cityEmojiPrompt?.classList.remove("is-visible");
+    } else {
+      this.drawCityEmoji(this.cityEmojiHits, 0);
+    }
+  }
+
+  splitCityEmoji() {
+    if (!this.cityEmojiSprite || this.cityEmojiFragments?.length) return;
+    const source = this.cityEmojiCanvas;
+    const origin = this.cityEmojiSprite.position.clone();
+    const lateral = new THREE.Vector3(
+      Math.cos(this.freeYaw),
+      0,
+      -Math.sin(this.freeYaw)
+    );
+    this.cityEmojiFragments = [0, 1].map((side) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 128;
+      canvas.height = 256;
+      const context = canvas.getContext("2d");
+      context.drawImage(source, side * 128, 0, 128, 256, 0, 0, 128, 256);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.position.copy(origin);
+      sprite.scale.set(2.55, 5.1, 1);
+      this.cityScene.add(sprite);
+      return {
+        sprite,
+        material,
+        texture,
+        origin: origin.clone(),
+        direction: lateral.clone().multiplyScalar(side ? 1 : -1),
+        spin: side ? -1 : 1
+      };
+    });
+    this.cityEmojiSprite.visible = false;
+  }
+
+  createCitySurfaceSymbols() {
+    if (this.citySurfaceSymbolMesh || !this.citySymbolMaterial) return;
+    const entries = [];
+    const originX = this.freeCameraPosition.x;
+    const originZ = this.freeCameraPosition.z;
+    const flatRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    const makeColor = (hue = Math.random()) => new THREE.Color().setHSL(hue, .96, random(.58, .82));
+    for (let index = 0; index < 780; index += 1) {
+      const angle = random(0, Math.PI * 2);
+      const radius = Math.sqrt(Math.random()) * 150;
+      const size = random(.32, 1.08);
+      entries.push({
+        position: new THREE.Vector3(
+          originX + Math.cos(angle) * radius,
+          .025 + Math.random() * .018,
+          originZ + Math.sin(angle) * radius
+        ),
+        quaternion: flatRotation,
+        scale: new THREE.Vector3(size, size, 1),
+        symbol: Math.floor(Math.random() * 32),
+        color: makeColor()
+      });
+    }
+    (this.cityChunks || []).forEach((chunk) => {
+      const chunkDistance = Math.hypot(
+        chunk.position.x - originX,
+        chunk.position.z - originZ
+      );
+      if (chunkDistance > 190) return;
+      chunk.userData.bioBuildings?.forEach((building) => {
+        const worldX = chunk.position.x + building.mesh.position.x;
+        const worldZ = chunk.position.z + building.mesh.position.z;
+        for (let index = 0; index < 10; index += 1) {
+          const size = random(.42, 1.3);
+          entries.push({
+            position: new THREE.Vector3(
+              worldX + random(-building.width * .38, building.width * .38),
+              building.height + .32,
+              worldZ + random(-building.depth * .38, building.depth * .38)
+            ),
+            quaternion: flatRotation,
+            scale: new THREE.Vector3(size, size, 1),
+            symbol: Math.floor(Math.random() * 32),
+            color: makeColor()
+          });
+        }
+      });
+    });
+    const material = this.citySymbolMaterial.clone();
+    material.uniforms = THREE.UniformsUtils.clone(this.citySymbolMaterial.uniforms);
+    material.uniforms.uAtlas.value = this.citySymbolMaterial.uniforms.uAtlas.value;
+    material.uniforms.uOpacity.value = 0;
+    const mesh = this.createCitySymbolMesh(entries, material);
+    if (!mesh) return;
+    mesh.renderOrder = 8;
+    this.cityScene.add(mesh);
+    this.citySurfaceSymbolMesh = mesh;
+    this.citySurfaceSymbolMaterial = material;
+  }
+
+  createCityBloodSurface(direction) {
+    if (this.cityBloodMesh) return;
+    const geometry = new THREE.PlaneGeometry(900, 900, 112, 112);
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uDirection: { value: new THREE.Vector2(direction.x, direction.z).normalize() },
+        uOrigin: { value: new THREE.Vector2(this.freeCameraPosition.x, this.freeCameraPosition.z) },
+        uOpacity: { value: 1 }
+      },
+      vertexShader: `
+        uniform float uTime;
+        varying vec3 vWorldPosition;
+        varying float vCrest;
+        void main() {
+          vec3 warped = position;
+          vec4 baseWorld = modelMatrix * vec4(position, 1.0);
+          float broad = sin(baseWorld.x * .055 + uTime * 1.65)
+            + sin(baseWorld.z * .071 - uTime * 1.23);
+          float detail = sin((baseWorld.x + baseWorld.z) * .19 + uTime * 2.8);
+          float wave = broad * .19 + detail * .07;
+          warped.z += wave;
+          vec4 world = modelMatrix * vec4(warped, 1.0);
+          vWorldPosition = world.xyz;
+          vCrest = wave;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec2 uDirection;
+        uniform vec2 uOrigin;
+        uniform float uOpacity;
+        varying vec3 vWorldPosition;
+        varying float vCrest;
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+        void main() {
+          vec2 relative = vWorldPosition.xz - uOrigin;
+          vec2 sideDirection = vec2(-uDirection.y, uDirection.x);
+          float along = dot(relative, uDirection);
+          float side = dot(relative, sideDirection);
+          float front = 100.0 - uTime * 18.0;
+          float edge = sin(side * .095 + uTime * 2.15) * 6.4
+            + sin(side * .027 - uTime * 1.1) * 9.0;
+          float coverage = smoothstep(front - 7.0 + edge, front + 2.2 + edge, along);
+          if (coverage < .012) discard;
+          float vein = sin(vWorldPosition.x * .29 + sin(vWorldPosition.z * .08) * 3.0 + uTime * .7);
+          float grain = hash(floor(vWorldPosition.xz * 2.2));
+          float crest = smoothstep(.12, .38, vCrest);
+          vec3 deep = vec3(.075, .0025, .003);
+          vec3 red = vec3(.42, .006, .008);
+          vec3 highlight = vec3(.78, .055, .035);
+          vec3 color = mix(deep, red, .42 + vein * .18 + grain * .1);
+          color = mix(color, highlight, crest * .52);
+          float foam = 1.0 - smoothstep(0.0, 9.0, abs(along - front - edge));
+          color = mix(color, vec3(.88, .16, .10), foam * .58);
+          gl_FragColor = vec4(color, coverage * uOpacity);
+        }
+      `,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: true
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(this.freeCameraPosition.x, .04, this.freeCameraPosition.z);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 7;
+    this.cityScene.add(mesh);
+    this.cityBloodMesh = mesh;
+    this.cityBloodMaterial = material;
+
+    const light = new THREE.PointLight(0xb91812, 0, 95, 1.6);
+    light.position.copy(this.freeCameraPosition);
+    light.position.y = 7;
+    this.cityScene.add(light);
+    this.cityBloodLight = light;
+  }
+
+  playCityFloodArrival() {
+    const context = this.audioContext;
+    if (!context || !this.audioMaster) return;
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const filter = context.createBiquadFilter();
+    oscillator.type = "sawtooth";
+    oscillator.frequency.setValueAtTime(46, now);
+    oscillator.frequency.exponentialRampToValueAtTime(25, now + 11);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(220, now);
+    filter.frequency.exponentialRampToValueAtTime(72, now + 11);
+    gain.gain.setValueAtTime(.0001, now);
+    gain.gain.exponentialRampToValueAtTime(.32, now + 4.6);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + 12);
+    oscillator.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.audioMaster);
+    oscillator.start(now);
+    oscillator.stop(now + 12.1);
+  }
+
+  startCityBloodFlood() {
+    if (this.cityFinaleState === "flood"
+      || this.cityFinaleState === "sink"
+      || this.cityFinaleState === "black") return;
+    this.cityFinaleState = "flood";
+    this.cityFloodTime = 0;
+    this.cityFloodLevel = .04;
+    this.cityFinaleLocksMovement = true;
+    this.cityEmojiPromptActive = false;
+    this.cityForwardTime = 480;
+    this.cityTravelDistance = Math.max(this.cityTravelDistance, 4200);
+    this.cityBiomechProgress = 1;
+    this.cityBiomechTarget = 1;
+    this.freeCameraVelocity.set(0, 0, 0);
+    this.freeCameraKeys.clear();
+    if (this.cityEmojiPrompt) this.cityEmojiPrompt.classList.remove("is-visible");
+
+    const horizontal = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
+    if (Math.abs(horizontal.x) > Math.abs(horizontal.z)) {
+      horizontal.set(Math.sign(horizontal.x) || 1, 0, 0);
+    } else {
+      horizontal.set(0, 0, Math.sign(horizontal.z) || -1);
+    }
+    this.cityFloodDirection = horizontal;
+    this.splitCityEmoji();
+    this.createCitySurfaceSymbols();
+    this.createCityBloodSurface(horizontal);
+    this.playCityFloodArrival();
+  }
+
+  updateCityFinale(delta) {
+    if (!this.cityEmojiSpawned
+      && this.cityForwardTime >= 480
+      && this.cityBiomechProgress > .96) {
+      this.spawnCityEmoji();
+    }
+    if (!this.cityEmojiSpawned) return;
+
+    this.cityEmojiHitCooldown = Math.max(0, this.cityEmojiHitCooldown - delta);
+    this.cityInfectedSymbolMeshes.forEach((record) => {
+      record.material.uniforms.uTime.value = this.elapsed;
+      const hardBlink = Math.sin(this.elapsed * (5.2 + record.hitIndex * .37) + record.phase) > .66
+        ? .28
+        : 1;
+      record.material.uniforms.uOpacity.value = (.62 + Math.sin(this.elapsed * 1.7 + record.phase) * .22) * hardBlink;
+    });
+
+    if (this.cityEmojiSprite?.visible) {
+      const pulse = 1 + Math.sin(this.elapsed * 2.15) * .025;
+      const hitBulge = 1 + this.cityEmojiShake * .08;
+      this.cityEmojiSprite.position.y = this.cityEmojiBasePosition.y + Math.sin(this.elapsed * 1.3) * .13;
+      this.cityEmojiSprite.scale.set(5.1 * pulse * hitBulge, 5.1 * pulse / hitBulge, 1);
+    }
+    this.updateCityEmojiPrompt();
+
+    if (this.cityFinaleState === "waiting") {
+      this.cityEmojiDeathTime += delta;
+      const bloodFrame = Math.floor(this.cityEmojiDeathTime * 10);
+      if (bloodFrame !== this.cityEmojiBloodFrame) {
+        this.cityEmojiBloodFrame = bloodFrame;
+        this.drawCityEmoji(5, clamp(this.cityEmojiDeathTime / 5.5, 0, 1));
+      }
+      if (this.cityEmojiDeathTime >= 15) this.startCityBloodFlood();
+    }
+
+    if (this.cityFinaleState === "flood") {
+      this.cityFloodTime += delta;
+      const floodTime = this.cityFloodTime;
+      if (this.cityBloodMaterial) {
+        this.cityBloodMaterial.uniforms.uTime.value = floodTime;
+      }
+      if (this.citySurfaceSymbolMaterial) {
+        this.citySurfaceSymbolMaterial.uniforms.uTime.value = this.elapsed;
+        this.citySurfaceSymbolMaterial.uniforms.uOpacity.value = clamp(floodTime / 4.2, 0, 1);
+      }
+      if (this.cityEmojiFragments) {
+        const fragmentT = clamp(floodTime / 4.8, 0, 1);
+        this.cityEmojiFragments.forEach((fragment) => {
+          fragment.sprite.position.copy(fragment.origin)
+            .addScaledVector(fragment.direction, fragmentT * fragmentT * 7.5);
+          fragment.sprite.position.y = fragment.origin.y - fragmentT * fragmentT * 4.8;
+          fragment.sprite.material.rotation = fragment.spin * fragmentT * 1.8;
+          fragment.material.opacity = 1 - Math.pow(fragmentT, 1.7);
+        });
+      }
+
+      const riseRaw = clamp((floodTime - 6) / 38, 0, 1);
+      const rise = riseRaw * riseRaw * (3 - 2 * riseRaw);
+      const waveBob = Math.sin(this.elapsed * 1.7) * .18 * rise;
+      this.cityFloodLevel = .04 + rise * 72;
+      if (this.cityBloodMesh) {
+        this.cityBloodMesh.position.y = this.cityFloodLevel + waveBob;
+      }
+      const cameraHeight = Math.max(3.6, this.cityFloodLevel + 2.72 + waveBob * .35);
+      this.freeCameraPosition.y = cameraHeight;
+      this.camera.position.y = cameraHeight;
+      this.camera.position.x += Math.sin(this.elapsed * 1.9) * .018 * rise;
+      this.camera.rotation.z += Math.sin(this.elapsed * 1.25) * .012 * rise;
+      if (this.cityBloodLight) {
+        this.cityBloodLight.position.copy(this.camera.position);
+        this.cityBloodLight.position.y = this.cityFloodLevel + 5;
+        this.cityBloodLight.intensity = clamp((floodTime - 3.5) / 8, 0, 1) * 3.7;
+      }
+      const roofBlackout = clamp((this.cityFloodLevel - 50) / 22, 0, 1);
+      if (this.transitionBlackout) {
+        this.transitionBlackout.style.background = "#000";
+        this.transitionBlackout.style.opacity = (roofBlackout * .78).toFixed(3);
+      }
+      if (floodTime >= 46) {
+        this.cityFinaleState = "sink";
+        this.citySinkTime = 0;
+        this.citySinkStartY = this.camera.position.y;
+      }
+    } else if (this.cityFinaleState === "sink") {
+      this.citySinkTime += delta;
+      const sinkTime = this.citySinkTime;
+      const sinkingY = this.citySinkStartY - sinkTime * sinkTime * 17;
+      this.camera.position.y = sinkingY;
+      this.freeCameraPosition.y = sinkingY;
+      if (this.cityBloodLight) {
+        this.cityBloodLight.intensity = Math.max(0, 3.5 - sinkTime * 1.3);
+        this.cityBloodLight.position.y = sinkingY + 1;
+      }
+      if (this.transitionBlackout) {
+        this.transitionBlackout.style.background = "#000";
+        this.transitionBlackout.style.opacity = clamp(.78 + sinkTime * .12, 0, 1).toFixed(3);
+      }
+      if (sinkTime >= 2.2) {
+        this.cityFinaleState = "black";
+        if (this.transitionBlackout) this.transitionBlackout.style.opacity = "1";
+      }
+    } else if (this.cityFinaleState === "black") {
+      if (this.transitionBlackout) {
+        this.transitionBlackout.style.background = "#000";
+        this.transitionBlackout.style.opacity = "1";
+      }
+      this.freeCameraVelocity.set(0, 0, 0);
+    }
+
+    if (this.cityEmojiShake > .001) {
+      const shake = this.cityEmojiShake;
+      this.camera.position.x += (Math.random() - .5) * .24 * shake;
+      this.camera.position.y += (Math.random() - .5) * .18 * shake;
+      this.camera.rotation.z += (Math.random() - .5) * .045 * shake;
+      this.cityEmojiShake = damp(this.cityEmojiShake, 0, 4.2, delta);
+    }
+  }
+
   enterCityWorld() {
     if (this.cityMode) return;
     this.cityMode = true;
@@ -3430,6 +4192,16 @@ class PrivateRoom {
     this.cityTravelDistance = 0;
     this.cityBiomechProgress = 0;
     this.cityBiomechTarget = 0;
+    this.cityForwardTime = 0;
+    this.cityEmojiSpawned = false;
+    this.cityEmojiHits = 0;
+    this.cityEmojiPromptActive = false;
+    this.cityEmojiHitCooldown = 0;
+    this.cityEmojiShake = 0;
+    this.cityEmojiDeathTime = 0;
+    this.cityFinaleState = "dormant";
+    this.cityFinaleLocksMovement = false;
+    this.cityInfectedSymbolMeshes = [];
     this.scene.visible = false;
     this.renderer.shadowMap.enabled = true;
     this.camera.near = .1;
@@ -3502,10 +4274,12 @@ class PrivateRoom {
     const forward = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
     const right = new THREE.Vector3(Math.cos(this.freeYaw), 0, -Math.sin(this.freeYaw));
     const input = new THREE.Vector3();
-    if (this.freeCameraKeys.has("KeyW")) input.add(forward);
-    if (this.freeCameraKeys.has("KeyS")) input.sub(forward);
-    if (this.freeCameraKeys.has("KeyD")) input.add(right);
-    if (this.freeCameraKeys.has("KeyA")) input.sub(right);
+    if (!this.cityFinaleLocksMovement) {
+      if (this.freeCameraKeys.has("KeyW")) input.add(forward);
+      if (this.freeCameraKeys.has("KeyS")) input.sub(forward);
+      if (this.freeCameraKeys.has("KeyD")) input.add(right);
+      if (this.freeCameraKeys.has("KeyA")) input.sub(right);
+    }
     const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
     const forwardIntent = input.lengthSq() > 0
       && input.clone().normalize().dot(forward) > .55;
@@ -3530,7 +4304,10 @@ class PrivateRoom {
       this.freeCameraPosition.x - previousCityX,
       this.freeCameraPosition.z - previousCityZ
     );
-    if (forwardIntent) this.cityTravelDistance += actualCityMovement;
+    if (forwardIntent && actualCityMovement > .001) {
+      this.cityTravelDistance += actualCityMovement;
+      this.cityForwardTime += delta;
+    }
     this.updateEndlessCity();
     this.camera.position.copy(this.freeCameraPosition);
     this.camera.position.y = 3.6 + Math.sin(this.elapsed * (running ? 9 : 6.5)) * Math.min(.045, desired.length() * .012);
@@ -3859,8 +4636,15 @@ class PrivateRoom {
     const context = new AudioContextClass();
     this.audioContext = context;
     this.audioMaster = context.createGain();
-    this.audioMaster.gain.value = .62;
-    this.audioMaster.connect(context.destination);
+    this.audioMaster.gain.value = .96;
+    this.audioCompressor = context.createDynamicsCompressor();
+    this.audioCompressor.threshold.value = -12;
+    this.audioCompressor.knee.value = 18;
+    this.audioCompressor.ratio.value = 3;
+    this.audioCompressor.attack.value = .004;
+    this.audioCompressor.release.value = .22;
+    this.audioMaster.connect(this.audioCompressor);
+    this.audioCompressor.connect(context.destination);
 
     this.ambientInput = context.createGain();
     this.ambientFilter = context.createBiquadFilter();
@@ -4062,7 +4846,7 @@ class PrivateRoom {
     filter.Q.value = .7;
 
     const gain = context.createGain();
-    const volume = running ? .105 : .072;
+    const volume = running ? .26 : .19;
     gain.gain.setValueAtTime(.0001, now);
     gain.gain.exponentialRampToValueAtTime(volume, now + .008);
     gain.gain.exponentialRampToValueAtTime(.0001, now + .14);
@@ -4106,8 +4890,16 @@ class PrivateRoom {
       )
       : 0;
 
-    const ambientLevel = inCorridor ? .29 * Math.pow(1 - stairApproach, 1.7) : 0;
-    const distortion = inCorridor ? clamp(this.audioCorridorDistortion, 0, 1) : 0;
+    const ambientLevel = inCorridor
+      ? .58 * Math.pow(1 - stairApproach, 1.7)
+      : this.cityMode
+        ? .46 + this.cityBiomechProgress * .16
+        : 0;
+    const distortion = inCorridor
+      ? clamp(this.audioCorridorDistortion, 0, 1)
+      : this.cityMode
+        ? .07 + this.cityBiomechProgress * .46 + (this.cityFinaleState === "flood" ? .18 : 0)
+        : 0;
     const cleanLevel = ambientLevel * (1 - distortion * .88);
     const brokenLevel = ambientLevel * (.025 + distortion * .46);
 
@@ -4115,11 +4907,11 @@ class PrivateRoom {
     const gustB = .5 + .5 * Math.sin(this.elapsed * .19 + 2.3);
     const gust = Math.pow(clamp(gustA * .72 + gustB * .28, 0, 1), 2.8);
     const windBase = this.skyMode
-      ? .055
+      ? .075
       : this.cityMode
-        ? (this.cityLanded ? .018 : .115)
+        ? (this.cityLanded ? .04 + this.cityBiomechProgress * .022 + (this.cityFinaleState === "flood" ? .075 : 0) : .18)
         : this.liminalFallAirborne
-          ? .13
+          ? .17
           : inCorridor
         ? clamp(stairApproach * .008 + climb * .046 + roomDepth * .012, 0, .064)
         : 0;
@@ -4134,13 +4926,13 @@ class PrivateRoom {
       this.ambientMelodyOsc.frequency.setTargetAtTime(note, now, .75);
       this.ambientMelodyGain.gain.cancelScheduledValues(now);
       this.ambientMelodyGain.gain.setValueAtTime(Math.max(.0001, this.ambientMelodyGain.gain.value), now);
-      this.ambientMelodyGain.gain.linearRampToValueAtTime(.075, now + .85);
-      this.ambientMelodyGain.gain.exponentialRampToValueAtTime(.008, now + 4.2);
+      this.ambientMelodyGain.gain.linearRampToValueAtTime(.17, now + .85);
+      this.ambientMelodyGain.gain.exponentialRampToValueAtTime(.022, now + 4.2);
     }
 
     this.ambientCleanGain.gain.setTargetAtTime(cleanLevel, now, .12);
     this.ambientGlitchGain.gain.setTargetAtTime(brokenLevel, now, .085);
-    this.glitchNoiseGain.gain.setTargetAtTime(ambientLevel * distortion * .19, now, .07);
+    this.glitchNoiseGain.gain.setTargetAtTime(ambientLevel * distortion * .24, now, .07);
     this.windGain.gain.setTargetAtTime(windLevel, now, .11);
     this.ambientGlitchFilter.frequency.setTargetAtTime(
       lerp(980, 270 + Math.sin(this.elapsed * 7.3) * 95, distortion),
@@ -4157,6 +4949,337 @@ class PrivateRoom {
     } else if (!movingOnGround) {
       this.lastFootstepIndex = footstepIndex;
     }
+  }
+
+  ensureLocationMenu() {
+    if (this.locationMenuElement) return;
+    const menu = document.createElement("section");
+    menu.className = "location-jump";
+    menu.setAttribute("data-overlay-ui", "");
+    menu.setAttribute("aria-hidden", "true");
+    menu.innerHTML = `
+      <div class="location-jump__eyebrow">БЫСТРЫЙ ПЕРЕХОД</div>
+      <div class="location-jump__name" data-location-name></div>
+      <div class="location-jump__counter" data-location-counter></div>
+      <div class="location-jump__controls">
+        <button type="button" data-location-prev aria-label="Предыдущий этап">&lt;</button>
+        <button type="button" class="location-jump__go" data-location-go>ПЕРЕЙТИ <kbd>,</kbd></button>
+        <button type="button" data-location-next aria-label="Следующий этап">&gt;</button>
+      </div>
+      <div class="location-jump__hint">&lt; / &gt; — выбор · , — переход · Esc — закрыть</div>
+    `;
+    document.body.appendChild(menu);
+    this.locationMenuElement = menu;
+    this.locationMenuName = menu.querySelector("[data-location-name]");
+    this.locationMenuCounter = menu.querySelector("[data-location-counter]");
+    menu.querySelector("[data-location-prev]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.changeLocationMenuSelection(-1);
+    });
+    menu.querySelector("[data-location-next]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.changeLocationMenuSelection(1);
+    });
+    menu.querySelector("[data-location-go]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.activateLocationMenuSelection();
+    });
+    this.renderLocationMenu();
+  }
+
+  renderLocationMenu() {
+    if (!this.locationStages.length) return;
+    const count = this.locationStages.length;
+    this.locationMenuIndex = (this.locationMenuIndex % count + count) % count;
+    const stage = this.locationStages[this.locationMenuIndex];
+    if (this.locationMenuName) this.locationMenuName.textContent = stage.label;
+    if (this.locationMenuCounter) {
+      this.locationMenuCounter.textContent = `${String(this.locationMenuIndex + 1).padStart(2, "0")} / ${String(count).padStart(2, "0")}`;
+    }
+  }
+
+  changeLocationMenuSelection(direction) {
+    this.locationMenuIndex += direction;
+    this.renderLocationMenu();
+    this.glitch = Math.max(this.glitch, .12);
+  }
+
+  openLocationMenu() {
+    this.ensureLocationMenu();
+    this.locationMenuOpen = true;
+    this.locationMenuKDown = false;
+    this.locationMenuHold = 0;
+    this.locationMenuElement?.classList.add("is-visible");
+    this.locationMenuElement?.setAttribute("aria-hidden", "false");
+    this.freeCameraKeys.clear();
+    this.freeCameraVelocity.set(0, 0, 0);
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
+  }
+
+  closeLocationMenu(restorePointer = true) {
+    this.locationMenuOpen = false;
+    this.locationMenuHold = 0;
+    this.locationMenuElement?.classList.remove("is-visible");
+    this.locationMenuElement?.setAttribute("aria-hidden", "true");
+    if (restorePointer && this.freeCameraEnabled && !this.isTouch) {
+      this.canvas.requestPointerLock?.();
+    }
+  }
+
+  updateLocationMenu(delta) {
+    if (this.locationMenuOpen || !this.locationMenuKDown) return;
+    this.locationMenuHold += delta;
+    if (this.locationMenuHold >= 5) this.openLocationMenu();
+  }
+
+  resetCityFinaleForJump() {
+    if (this.cityEmojiSprite) {
+      this.cityEmojiSprite.parent?.remove(this.cityEmojiSprite);
+      this.cityEmojiSprite.material?.dispose?.();
+      this.cityEmojiTexture?.dispose?.();
+    }
+    this.cityEmojiSprite = null;
+    this.cityEmojiTexture = null;
+    this.cityEmojiCanvas = null;
+    this.cityEmojiContext = null;
+    (this.cityEmojiFragments || []).forEach((fragment) => {
+      fragment.sprite.parent?.remove(fragment.sprite);
+      fragment.material?.dispose?.();
+      fragment.texture?.dispose?.();
+    });
+    this.cityEmojiFragments = [];
+    (this.cityInfectedSymbolMeshes || []).forEach((record) => {
+      record.mesh.parent?.remove(record.mesh);
+      record.mesh.geometry?.dispose?.();
+      record.material?.dispose?.();
+    });
+    this.cityInfectedSymbolMeshes = [];
+    this.cityChunks?.forEach((chunk) => {
+      chunk.userData.bioBuildings?.forEach((record) => {
+        record.cityEmojiInfected = false;
+      });
+    });
+    if (this.citySurfaceSymbolMesh) {
+      this.citySurfaceSymbolMesh.parent?.remove(this.citySurfaceSymbolMesh);
+      this.citySurfaceSymbolMesh.geometry?.dispose?.();
+      this.citySurfaceSymbolMaterial?.dispose?.();
+    }
+    if (this.cityBloodMesh) {
+      this.cityBloodMesh.parent?.remove(this.cityBloodMesh);
+      this.cityBloodMesh.geometry?.dispose?.();
+      this.cityBloodMaterial?.dispose?.();
+    }
+    if (this.cityBloodLight) this.cityBloodLight.parent?.remove(this.cityBloodLight);
+    this.citySurfaceSymbolMesh = null;
+    this.citySurfaceSymbolMaterial = null;
+    this.cityBloodMesh = null;
+    this.cityBloodMaterial = null;
+    this.cityBloodLight = null;
+    this.cityEmojiSpawned = false;
+    this.cityEmojiHits = 0;
+    this.cityEmojiPromptActive = false;
+    this.cityEmojiDeathTime = 0;
+    this.cityEmojiShake = 0;
+    this.cityFinaleState = "dormant";
+    this.cityFinaleLocksMovement = false;
+    this.cityFloodTime = 0;
+    this.cityFloodLevel = 0;
+    this.citySinkTime = 0;
+    this.cityEmojiPrompt?.classList.remove("is-visible");
+  }
+
+  prepareWalkJump() {
+    if (!this.freeCameraEnabled) {
+      this.freeCameraEnabled = true;
+      document.body.classList.add("is-observing");
+      this.mobileControls?.setAttribute("aria-hidden", "false");
+    }
+    this.cameraMode = "observe";
+    this.boardTransition = 0;
+    this.boardTransitionTarget = 0;
+    this.portalSequence = null;
+    this.freeCameraKeys.clear();
+    this.freeCameraVelocity.set(0, 0, 0);
+    this.mobileMoveInput.set(0, 0);
+    this.mobileLookInput.set(0, 0);
+    this.freeGroundBlend = 1;
+    this.freeStartEyeHeight = this.freeEyeHeight;
+    this.walkAmount = 0;
+    this.liminalFall = false;
+    this.liminalFallTime = 0;
+  }
+
+  jumpToLiminalStage(x, z, yaw, entered = true) {
+    this.prepareWalkJump();
+    this.cityMode = false;
+    this.skyMode = false;
+    this.scene.visible = true;
+    this.renderer.shadowMap.enabled = true;
+    this.camera.near = .1;
+    this.camera.far = 110;
+    this.camera.updateProjectionMatrix();
+    this.liminalEntered = entered;
+    this.liminalDoorTarget = entered ? 1 : 0;
+    this.liminalDoorOpenAmount = entered ? 1 : 0;
+    this.liminalPromptActive = false;
+    this.doorPrompt?.classList.remove("is-visible");
+    this.freeYaw = yaw;
+    this.freePitch = 0;
+    this.freeCameraPosition.set(x, this.freeEyeHeight, z);
+    this.camera.position.copy(this.freeCameraPosition);
+    this.camera.rotation.order = "YXZ";
+    this.camera.rotation.set(0, yaw, 0);
+    this.glitch = 0;
+    this.nextGlitch = this.elapsed + random(2.4, 5.2);
+    const screenEffects = document.querySelector(".screen-effects");
+    if (screenEffects) screenEffects.style.display = "";
+    if (this.transitionBlackout) {
+      this.transitionBlackout.style.background = "#000";
+      this.transitionBlackout.style.opacity = "0";
+    }
+  }
+
+  jumpToCityStage(stageId) {
+    this.resetCityFinaleForJump();
+    this.prepareWalkJump();
+    this.skyMode = false;
+    this.cityMode = false;
+    this.enterCityWorld();
+    this.cityLanded = true;
+    this.cityLandingTime = 2;
+    this.cityImpactPlayed = true;
+    this.freeYaw = 0;
+    this.freePitch = 0;
+    this.freeCameraPosition.set(0, 3.6, 14);
+    this.camera.position.copy(this.freeCameraPosition);
+    this.camera.rotation.set(0, 0, 0);
+    this.scene.visible = false;
+    if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
+    if (stageId === "city") return;
+
+    this.cityTravelDistance = stageId === "mutation" ? 2100 : 4300;
+    this.cityForwardTime = stageId === "mutation" ? 420 : 480;
+    this.cityBiomechProgress = stageId === "mutation" ? .78 : 1;
+    this.cityBiomechTarget = this.cityBiomechProgress;
+    this.updateEndlessCity();
+    this.updateCityBiomech(0);
+    if (stageId === "mutation") return;
+
+    this.spawnCityEmoji();
+    if (this.cityEmojiSprite) {
+      const toEmoji = this.cityEmojiSprite.position.clone().sub(this.freeCameraPosition);
+      this.freeYaw = Math.atan2(-toEmoji.x, -toEmoji.z);
+      this.camera.rotation.set(0, this.freeYaw, 0);
+    }
+    if (stageId === "emoji") return;
+
+    this.cityEmojiHits = this.cityEmojiMaxHits;
+    this.cityFinaleState = "waiting";
+    this.cityEmojiDeathTime = 15;
+    this.drawCityEmoji(5, 1);
+    this.startCityBloodFlood();
+    if (stageId === "flood") return;
+
+    if (stageId === "flood-peak") {
+      this.cityFloodTime = 38;
+      this.updateCityFinale(0);
+      return;
+    }
+    this.cityFinaleState = "black";
+    this.cityFinaleLocksMovement = true;
+    if (this.transitionBlackout) {
+      this.transitionBlackout.style.background = "#000";
+      this.transitionBlackout.style.opacity = "1";
+    }
+  }
+
+  jumpToLocationStage(stageId) {
+    if (stageId === "start") {
+      this.cityMode = false;
+      this.skyMode = false;
+      this.scene.visible = true;
+      this.renderer.shadowMap.enabled = true;
+      this.liminalEntered = false;
+      this.liminalDoorTarget = 0;
+      this.liminalDoorOpenAmount = 0;
+      this.liminalFall = false;
+      this.cameraMode = "default";
+      this.boardTransition = 0;
+      this.boardTransitionTarget = 0;
+      if (this.freeCameraEnabled) this.disableFreeCamera();
+      this.camera.position.set(0, 5.25, 15.8);
+      this.camera.rotation.set(0, 0, 0);
+      if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
+      return;
+    }
+    if (stageId === "corridor") {
+      this.jumpToLiminalStage(0, 48, Math.PI, false);
+      return;
+    }
+    if (stageId === "junction") {
+      this.jumpToLiminalStage(0, this.liminalCenterZ, -Math.PI / 2, true);
+      return;
+    }
+    if (stageId === "right") {
+      this.jumpToLiminalStage(108, this.liminalCenterZ, -Math.PI / 2, true);
+      return;
+    }
+    if (stageId === "fall") {
+      this.jumpToLiminalStage(118.7, this.liminalCenterZ, -Math.PI / 2, true);
+      return;
+    }
+    if (stageId === "left") {
+      this.jumpToLiminalStage(-105, this.liminalCenterZ, Math.PI / 2, true);
+      return;
+    }
+    if (stageId === "stairs") {
+      this.jumpToLiminalStage(this.liminalStairStartX - 3.2, this.liminalCenterZ, Math.PI / 2, true);
+      return;
+    }
+    if (stageId === "white-room") {
+      this.jumpToLiminalStage(this.liminalStairEndX - 1.2, this.liminalCenterZ, Math.PI / 2, true);
+      return;
+    }
+    if (stageId === "sky") {
+      this.jumpToLiminalStage(this.liminalStairExitX - .2, this.liminalCenterZ, Math.PI / 2, true);
+      this.enterCloudWorld();
+      this.skyTransition = this.skyWhiteHold + this.skyTransitionDuration;
+      if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
+      return;
+    }
+    this.jumpToCityStage(stageId);
+  }
+
+  activateLocationMenuSelection() {
+    const stage = this.locationStages[this.locationMenuIndex];
+    if (!stage) return;
+    this.jumpToLocationStage(stage.id);
+    this.closeLocationMenu(true);
+  }
+
+  handleLocationMenuKey(event) {
+    if (!this.locationMenuOpen) return false;
+    if (event.key === "<" || event.code === "ArrowLeft") {
+      event.preventDefault();
+      this.changeLocationMenuSelection(-1);
+      return true;
+    }
+    if (event.key === ">" || event.code === "ArrowRight") {
+      event.preventDefault();
+      this.changeLocationMenuSelection(1);
+      return true;
+    }
+    if ((event.code === "Comma" && !event.shiftKey) || event.code === "Enter") {
+      event.preventDefault();
+      this.activateLocationMenuSelection();
+      return true;
+    }
+    if (event.code === "Escape" || event.code === "KeyK") {
+      event.preventDefault();
+      this.closeLocationMenu(true);
+      return true;
+    }
+    return false;
   }
 
   bindEvents() {
@@ -4211,7 +5334,24 @@ class PrivateRoom {
     });
 
     window.addEventListener("keydown", (event) => {
+      if (event.code === "KeyK") {
+        if (event.repeat) return;
+        event.preventDefault();
+        if (this.locationMenuOpen) {
+          this.closeLocationMenu(true);
+        } else {
+          this.locationMenuKDown = true;
+          this.locationMenuHold = 0;
+        }
+        return;
+      }
+      if (this.locationMenuOpen && this.handleLocationMenuKey(event)) return;
       if (!this.freeCameraEnabled) return;
+      if (event.code === "KeyE" && this.cityEmojiPromptActive) {
+        event.preventDefault();
+        this.hitCityEmoji();
+        return;
+      }
       if (event.code === "KeyE" && this.liminalPromptActive) {
         event.preventDefault();
         this.openLiminalDoor();
@@ -4225,6 +5365,10 @@ class PrivateRoom {
     });
 
     window.addEventListener("keyup", (event) => {
+      if (event.code === "KeyK") {
+        this.locationMenuKDown = false;
+        if (!this.locationMenuOpen) this.locationMenuHold = 0;
+      }
       this.freeCameraKeys.delete(event.code);
     });
 
@@ -4789,6 +5933,7 @@ class PrivateRoom {
   updateEffects(delta) {
     if (this.cityMode) {
       this.updateCityBiomech(delta);
+      this.updateCityFinale(delta);
       const cityTheme = this.themeDefinitions[this.activeTheme];
       if (!this.reduceMotion && this.elapsed > this.nextGlitch) {
         this.glitch = this.activeTheme === "fever" ? 1 : random(.42, .78);
@@ -4877,6 +6022,7 @@ class PrivateRoom {
     requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), .05);
     this.elapsed += delta;
+    this.updateLocationMenu(delta);
     this.updateTheme(delta);
     this.updateCamera(delta);
     this.updateEffects(delta);
