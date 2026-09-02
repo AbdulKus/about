@@ -2092,6 +2092,7 @@ class PrivateRoom {
     };
     const roadReliefTexture = makeReliefTexture("road");
     const pavementReliefTexture = makeReliefTexture("pavement");
+    this.cityRoadReliefTexture = roadReliefTexture;
 
     this.cityRoofMaterial = new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .68, metalness: .42 });
     this.cityAsphaltMaterial = new THREE.MeshStandardMaterial({
@@ -2414,7 +2415,7 @@ class PrivateRoom {
     const patchMaterial = new THREE.MeshStandardMaterial({
       color: 0x11151a,
       roughness: .96,
-      bumpMap: roadReliefTexture,
+      bumpMap: this.cityRoadReliefTexture,
       bumpScale: .24
     });
     for (let patchIndex = 0; patchIndex < 3; patchIndex += 1) {
