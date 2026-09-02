@@ -2137,9 +2137,35 @@ class PrivateRoom {
     const upperLeftGeometry = makeWing(-1, false);
     const lowerRightGeometry = makeWing(1, true);
     const lowerLeftGeometry = makeWing(-1, true);
+    const wingTextureCanvas = document.createElement("canvas");
+    wingTextureCanvas.width = wingTextureCanvas.height = 256;
+    const wingTextureContext = wingTextureCanvas.getContext("2d");
+    const wingGlow = wingTextureContext.createRadialGradient(32, 224, 4, 118, 124, 172);
+    wingGlow.addColorStop(0, "rgba(255,255,255,.98)");
+    wingGlow.addColorStop(.58, "rgba(255,255,255,.86)");
+    wingGlow.addColorStop(1, "rgba(255,255,255,.18)");
+    wingTextureContext.fillStyle = wingGlow;
+    wingTextureContext.fillRect(0, 0, 256, 256);
+    wingTextureContext.strokeStyle = "rgba(50,24,35,.58)";
+    wingTextureContext.lineWidth = 4;
+    wingTextureContext.lineCap = "round";
+    [[26, 225, 202, 48], [28, 226, 218, 108], [30, 224, 190, 178], [31, 222, 114, 30]].forEach((vein) => {
+      wingTextureContext.beginPath();
+      wingTextureContext.moveTo(vein[0], vein[1]);
+      wingTextureContext.quadraticCurveTo(112, 145, vein[2], vein[3]);
+      wingTextureContext.stroke();
+    });
+    wingTextureContext.strokeStyle = "rgba(255,255,255,.42)";
+    wingTextureContext.lineWidth = 5;
+    wingTextureContext.strokeRect(4, 4, 248, 248);
+    const wingTexture = new THREE.CanvasTexture(wingTextureCanvas);
+    wingTexture.colorSpace = THREE.SRGBColorSpace;
+    wingTexture.minFilter = THREE.LinearMipmapLinearFilter;
+
     const butterflyCount = 28;
     const wingMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
+      map: wingTexture,
       vertexColors: true,
       side: THREE.DoubleSide,
       transparent: true,
@@ -2173,6 +2199,17 @@ class PrivateRoom {
     });
     this.skyButterflyBody.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.skyButterflyBody.frustumCulled = false;
+    this.skyButterflyAntennae = [-1, 1].map(() => {
+      const antenna = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(.008, .013, .34, 5),
+        bodyMaterial,
+        butterflyCount
+      );
+      antenna.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      antenna.frustumCulled = false;
+      this.skyButterflyGroup.add(antenna);
+      return antenna;
+    });
     this.skyButterflyGroup.add(this.skyButterflyBody);
     this.skyMeadowRoot.add(this.skyButterflyGroup);
     const butterflyPalette = [0xffc536, 0x67b8ff, 0xf073b8, 0xf9f0de, 0x9379ec, 0xff7b59];
@@ -2309,11 +2346,24 @@ class PrivateRoom {
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       this.skyButterflyBody.setMatrixAt(index, dummy.matrix);
+      this.skyButterflyAntennae.forEach((antenna, antennaIndex) => {
+        const side = antennaIndex ? 1 : -1;
+        const sideX = Math.cos(yaw) * side * .075;
+        const sideZ = -Math.sin(yaw) * side * .075;
+        dummy.position.set(x + sideX, y + .29 * scale, z + sideZ);
+        dummy.rotation.set(.18, yaw, side * .58);
+        dummy.scale.setScalar(scale);
+        dummy.updateMatrix();
+        antenna.setMatrixAt(index, dummy.matrix);
+      });
     });
     this.skyButterflyMeshes.forEach((mesh) => {
       mesh.instanceMatrix.needsUpdate = true;
     });
     this.skyButterflyBody.instanceMatrix.needsUpdate = true;
+    this.skyButterflyAntennae.forEach((antenna) => {
+      antenna.instanceMatrix.needsUpdate = true;
+    });
   }
 
   updateSkyMeadow(delta, movingOnSky) {
@@ -2365,9 +2415,9 @@ class PrivateRoom {
       const x = this.freeCameraPosition.x + Math.cos(angle) * record.radius;
       const z = this.freeCameraPosition.z + Math.sin(angle) * record.radius * .78;
       const touchHeight = this.skyMeadowHeightWorld(x, z)
-        + record.size * .31
-        + .4
-        + Math.sin(this.elapsed * .14 + record.phase + index) * .28;
+        + record.size * .51
+        + .45
+        + Math.sin(this.elapsed * .14 + record.phase + index) * .18;
       record.sprite.position.set(x, touchHeight, z);
     });
 
@@ -2468,7 +2518,11 @@ class PrivateRoom {
     this.resize();
     if (!this.skyMeadowCompiled && this.skyMeadowRoot) {
       this.skyMeadowRoot.visible = true;
+      if (this.skyDoorRoot) this.skyDoorRoot.visible = true;
+      if (this.skyButterflyGroup) this.skyButterflyGroup.visible = true;
       this.renderer.compile(this.skyMeadowScene, this.camera);
+      if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
+      if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
       this.skyMeadowRoot.visible = false;
       this.skyMeadowCompiled = true;
     }
