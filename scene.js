@@ -126,6 +126,7 @@ class PrivateRoom {
     this.skyMeadowTileSize = SKY_MEADOW_SETTINGS.tileSize;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
+    this.skyDoorLandscape = new THREE.Vector3(0, 0, 0);
     this.skyMeadowTileCenterX = Number.NaN;
     this.skyMeadowTileCenterZ = Number.NaN;
     this.skySpawnPosition = new THREE.Vector3();
@@ -247,6 +248,54 @@ class PrivateRoom {
     noiseElement.style.backgroundImage = `url(${canvas.toDataURL("image/png")})`;
     noiseElement.style.backgroundSize = `${cssTileSize}px ${cssTileSize}px`;
     noiseElement.style.backgroundRepeat = "repeat";
+  }
+
+  createMeadowGroundTexture() {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const context = canvas.getContext("2d");
+    const image = context.createImageData(size, size);
+    const hash = (x, y, salt) => {
+      let value = Math.imul(x + salt * 1013, 374761393) + Math.imul(y - salt * 733, 668265263);
+      value = Math.imul(value ^ (value >>> 13), 1274126177);
+      return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+    };
+    const periodicNoise = (x, y, cells, salt) => {
+      const scaledX = x / size * cells;
+      const scaledY = y / size * cells;
+      const x0 = Math.floor(scaledX);
+      const y0 = Math.floor(scaledY);
+      const x1 = (x0 + 1) % cells;
+      const y1 = (y0 + 1) % cells;
+      const fx = smoothstep01(scaledX - x0);
+      const fy = smoothstep01(scaledY - y0);
+      const a = lerp(hash(x0 % cells, y0 % cells, salt), hash(x1, y0 % cells, salt), fx);
+      const b = lerp(hash(x0 % cells, y1, salt), hash(x1, y1, salt), fx);
+      return lerp(a, b, fy);
+    };
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const broad = periodicNoise(x, y, 4, 3) * .43
+          + periodicNoise(x, y, 9, 7) * .31
+          + periodicNoise(x, y, 21, 11) * .18
+          + periodicNoise(x, y, 47, 19) * .08;
+        const speckle = (hash(x, y, 29) - .5) * 7;
+        const index = (y * size + x) * 4;
+        image.data[index] = clamp(Math.round(20 + broad * 55 + speckle), 0, 255);
+        image.data[index + 1] = clamp(Math.round(67 + broad * 105 + speckle), 0, 255);
+        image.data[index + 2] = clamp(Math.round(15 + broad * 34 + speckle * .45), 0, 255);
+        image.data[index + 3] = 255;
+      }
+    }
+    context.putImageData(image, 0, 0);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
+    return texture;
   }
 
   createMaterials() {
@@ -1532,7 +1581,10 @@ class PrivateRoom {
         uUp: { value: new THREE.Vector3(0, 1, 0) },
         uCompositeMode: { value: 0 },
         uMeadowBaseY: { value: 0 },
-        uDoorDistance: { value: 0 }
+        uMeadowProgress: { value: 0 },
+        uDoorLandscape: { value: this.skyDoorLandscape },
+        uDoorDistance: { value: 0 },
+        uCloudQuality: { value: this.isTouch ? 0 : 1 }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -1554,9 +1606,28 @@ class PrivateRoom {
         uniform vec3 uUp;
         uniform float uCompositeMode;
         uniform float uMeadowBaseY;
+        uniform float uMeadowProgress;
+        uniform vec3 uDoorLandscape;
         uniform float uDoorDistance;
+        uniform float uCloudQuality;
 
         ${SKY_HILL_GLSL}
+
+        float meadowEmergenceOffset(vec2 p) {
+          float envelope = 4.0 * uMeadowProgress * (1.0 - uMeadowProgress);
+          float variation = sin(p.x * .013 + sin(p.y * .008) * 1.4) * .058
+            + cos(p.y * .011 - .7) * .046
+            + sin((p.x + p.y) * .019 + 2.1) * .028;
+          return 38.0 * variation * envelope;
+        }
+
+        float doorLandscapeOffset(vec2 p) {
+          float distanceToDoor = distance(p, uDoorLandscape.xy);
+          float bowl = -5.2 * (1.0 - smoothstep(0.0, 18.0, distanceToDoor));
+          float ridgeDistance = (distanceToDoor - 31.0) / 9.5;
+          float ridge = 8.6 * exp(-ridgeDistance * ridgeDistance);
+          return (bowl + ridge) * uDoorLandscape.z;
+        }
 
         float hash31(vec3 p) {
           p = fract(p * .1031);
@@ -1590,15 +1661,22 @@ class PrivateRoom {
           return value;
         }
 
+        float mobileFbm3(vec3 p) {
+          return noise3(p) * .68 + noise3(p * 2.02 + vec3(11.7, 4.3, 8.1)) * .32;
+        }
+
         float cloudDensity(vec3 p) {
           vec3 drift = vec3(uTime * 1.35, sin(uTime * .07) * 1.8, uTime * .48);
           vec3 q = p + drift;
           q.xz += vec2(sin(q.z * .016), sin(q.x * .014)) * 6.2;
 
-          float body = fbm3(q * .021);
+          float body = uCloudQuality > .5 ? fbm3(q * .021) : mobileFbm3(q * .021);
           float detail = noise3(q * .082 + vec3(7.1, -3.4, 12.8));
-          float fluff = noise3(q * .157 + vec3(-5.6, 9.2, 2.4));
-          float shape = body * .76 + detail * .19 + fluff * .05;
+          float shape = body * .82 + detail * .18;
+          if (uCloudQuality > .5) {
+            float fluff = noise3(q * .157 + vec3(-5.6, 9.2, 2.4));
+            shape = body * .76 + detail * .19 + fluff * .05;
+          }
 
           float relativeY = p.y - uCameraPos.y;
           float layer = smoothstep(-42.0, -18.0, relativeY)
@@ -1635,12 +1713,14 @@ class PrivateRoom {
           float t = 1.2 + hash31(vec3(gl_FragCoord.xy, 17.0)) * 3.1;
 
           for (int i = 0; i < 28; i++) {
-            if (uCompositeMode < .5 && i >= 24) break;
+            if (uCloudQuality < .5 && i >= 18) break;
             vec3 pos = ro + rd * t;
             if (uCompositeMode > 1.5) {
               if (t >= uDoorDistance) break;
             } else if (uCompositeMode > .5) {
-              float groundY = uMeadowBaseY + hillHeight(pos.xz);
+              float groundY = uMeadowBaseY + hillHeight(pos.xz)
+                + meadowEmergenceOffset(pos.xz)
+                + doorLandscapeOffset(pos.xz);
               if (pos.y <= groundY + .14) break;
             }
             float density = cloudDensity(pos);
@@ -1657,19 +1737,18 @@ class PrivateRoom {
               cloud *= mix(vec3(1.0), pearl, edge * .10);
               cloud += sunColor * sunView * edge * .13;
 
-              float stepLength = uCompositeMode > .5
-                ? mix(3.15, 16.0, smoothstep(12.0, 100.0, t))
-                : mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
+              float stepLength = uCloudQuality < .5
+                ? mix(4.2, 20.0, smoothstep(8.0, 80.0, t))
+                : mix(3.15, 16.0, smoothstep(12.0, 100.0, t));
               float alpha = 1.0 - exp(-density * stepLength * .39);
               scattering += cloud * alpha * transmittance;
               transmittance *= 1.0 - alpha;
               if (transmittance < .025) break;
             }
-            t += uCompositeMode > .5
-              ? mix(3.15, 16.0, smoothstep(12.0, 100.0, t))
-              : mix(3.15, 6.2, clamp(t / 158.0, 0.0, 1.0));
-            if (uCompositeMode < .5 && t > 168.0) break;
-            if (uCompositeMode > .5 && uCompositeMode < 1.5 && t > 238.0) break;
+            t += uCloudQuality < .5
+              ? mix(4.2, 20.0, smoothstep(8.0, 80.0, t))
+              : mix(3.15, 16.0, smoothstep(12.0, 100.0, t));
+            if (uCompositeMode < 1.5 && t > 238.0) break;
           }
 
           if (uCompositeMode > .5) {
@@ -1730,7 +1809,13 @@ class PrivateRoom {
   }
 
   skyMeadowHeightWorld(x, z) {
-    return sampleSkyMeadowHeight(x, z);
+    const baseHeight = sampleSkyMeadowHeight(x, z);
+    if (!this.skyDoorLandscape?.z) return baseHeight;
+    const distanceToDoor = Math.hypot(x - this.skyDoorLandscape.x, z - this.skyDoorLandscape.y);
+    const bowl = -5.2 * (1 - smoothstep01(clamp(distanceToDoor / 18, 0, 1)));
+    const ridgeDistance = (distanceToDoor - 31) / 9.5;
+    const ridge = 8.6 * Math.exp(-ridgeDistance * ridgeDistance);
+    return baseHeight + (bowl + ridge) * this.skyDoorLandscape.z;
   }
 
   createSkyMeadowWorld() {
@@ -1758,25 +1843,49 @@ class PrivateRoom {
       terrainSegments
     );
     terrainGeometry.rotateX(-Math.PI / 2);
+    const meadowGroundTexture = this.createMeadowGroundTexture();
     const terrainMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uOpacity: { value: 0 },
-        uTime: { value: 0 }
+        uTime: { value: 0 },
+        uRiseProgress: { value: 0 },
+        uDoorLandscape: { value: this.skyDoorLandscape },
+        uMobile: { value: this.isTouch ? 1 : 0 },
+        uGroundMap: { value: meadowGroundTexture }
       },
       vertexShader: `
         varying vec2 vWorldXZ;
         varying vec3 vWorldNormal;
         varying vec3 vWorldPosition;
+        uniform float uRiseProgress;
+        uniform vec3 uDoorLandscape;
         ${hillFunctionGlsl}
+        float emergenceOffset(vec2 p) {
+          float envelope = 4.0 * uRiseProgress * (1.0 - uRiseProgress);
+          float variation = sin(p.x * .013 + sin(p.y * .008) * 1.4) * .058
+            + cos(p.y * .011 - .7) * .046
+            + sin((p.x + p.y) * .019 + 2.1) * .028;
+          return 38.0 * variation * envelope;
+        }
+        float doorLandscapeOffset(vec2 p) {
+          float distanceToDoor = distance(p, uDoorLandscape.xy);
+          float bowl = -5.2 * (1.0 - smoothstep(0.0, 18.0, distanceToDoor));
+          float ridgeDistance = (distanceToDoor - 31.0) / 9.5;
+          float ridge = 8.6 * exp(-ridgeDistance * ridgeDistance);
+          return (bowl + ridge) * uDoorLandscape.z;
+        }
+        float meadowSurfaceHeight(vec2 p) {
+          return hillHeight(p) + emergenceOffset(p) + doorLandscapeOffset(p);
+        }
         void main() {
           vec4 world = modelMatrix * vec4(position, 1.0);
           float baseY = modelMatrix[3].y;
-          world.y = baseY + hillHeight(world.xz);
+          world.y = baseY + meadowSurfaceHeight(world.xz);
           float epsilon = .48;
-          float leftHeight = hillHeight(world.xz - vec2(epsilon, 0.0));
-          float rightHeight = hillHeight(world.xz + vec2(epsilon, 0.0));
-          float backHeight = hillHeight(world.xz - vec2(0.0, epsilon));
-          float frontHeight = hillHeight(world.xz + vec2(0.0, epsilon));
+          float leftHeight = meadowSurfaceHeight(world.xz - vec2(epsilon, 0.0));
+          float rightHeight = meadowSurfaceHeight(world.xz + vec2(epsilon, 0.0));
+          float backHeight = meadowSurfaceHeight(world.xz - vec2(0.0, epsilon));
+          float frontHeight = meadowSurfaceHeight(world.xz + vec2(0.0, epsilon));
           vWorldNormal = normalize(vec3(leftHeight - rightHeight, epsilon * 2.0, backHeight - frontHeight));
           vWorldXZ = world.xz;
           vWorldPosition = world.xyz;
@@ -1787,6 +1896,8 @@ class PrivateRoom {
         precision highp float;
         uniform float uOpacity;
         uniform float uTime;
+        uniform float uMobile;
+        uniform sampler2D uGroundMap;
         varying vec2 vWorldXZ;
         varying vec3 vWorldNormal;
         varying vec3 vWorldPosition;
@@ -1813,22 +1924,28 @@ class PrivateRoom {
 
           // Fine upright strokes keep the ground itself grassy even between 3D blades.
           // They fade before they can turn into distant screen-space noise.
-          vec2 tinyGrid = vWorldXZ * 2.15;
-          vec2 tinyCell = fract(tinyGrid);
-          vec2 tinyIndex = floor(tinyGrid);
-          float tinySeed = meadowHash(tinyIndex);
-          float tinyLean = mix(-.24, .24, meadowHash(tinyIndex + vec2(17.0, 9.0)));
-          float tinyCenter = .16 + tinySeed * .68 + (tinyCell.y - .5) * tinyLean;
-          float tinyBlade = 1.0 - smoothstep(.025, .082, abs(tinyCell.x - tinyCenter));
-          tinyBlade *= smoothstep(.02, .16, tinyCell.y) * (1.0 - smoothstep(.62, .98, tinyCell.y));
-          vec2 shortGrid = vWorldXZ * 3.55 + vec2(7.3, 19.1);
-          vec2 shortCell = fract(shortGrid);
-          float shortCenter = .14 + meadowHash(floor(shortGrid)) * .72;
-          float shortBlade = 1.0 - smoothstep(.018, .065, abs(shortCell.x - shortCenter));
-          shortBlade *= smoothstep(.02, .15, shortCell.y) * (1.0 - smoothstep(.42, .8, shortCell.y));
-          float tinyBladeFade = 1.0 - smoothstep(82.0, 205.0, distanceToCamera);
-          albedo += vec3(.095, .17, .032) * (tinyBlade * .26 + shortBlade * .13) * tinyBladeFade;
-          albedo -= vec3(.025, .045, .012) * (1.0 - tinyBlade) * tinyBladeFade * .11;
+          if (uMobile < .5) {
+            vec2 tinyGrid = vWorldXZ * 2.15;
+            vec2 tinyCell = fract(tinyGrid);
+            vec2 tinyIndex = floor(tinyGrid);
+            float tinySeed = meadowHash(tinyIndex);
+            float tinyLean = mix(-.24, .24, meadowHash(tinyIndex + vec2(17.0, 9.0)));
+            float tinyCenter = .16 + tinySeed * .68 + (tinyCell.y - .5) * tinyLean;
+            float tinyBlade = 1.0 - smoothstep(.025, .082, abs(tinyCell.x - tinyCenter));
+            tinyBlade *= smoothstep(.02, .16, tinyCell.y) * (1.0 - smoothstep(.62, .98, tinyCell.y));
+            vec2 shortGrid = vWorldXZ * 3.55 + vec2(7.3, 19.1);
+            vec2 shortCell = fract(shortGrid);
+            float shortCenter = .14 + meadowHash(floor(shortGrid)) * .72;
+            float shortBlade = 1.0 - smoothstep(.018, .065, abs(shortCell.x - shortCenter));
+            shortBlade *= smoothstep(.02, .15, shortCell.y) * (1.0 - smoothstep(.42, .8, shortCell.y));
+            float tinyBladeFade = 1.0 - smoothstep(82.0, 205.0, distanceToCamera);
+            albedo += vec3(.095, .17, .032) * (tinyBlade * .26 + shortBlade * .13) * tinyBladeFade;
+            albedo -= vec3(.025, .045, .012) * (1.0 - tinyBlade) * tinyBladeFade * .11;
+          } else {
+            vec3 groundA = texture2D(uGroundMap, vWorldXZ * .0064).rgb;
+            vec3 groundB = texture2D(uGroundMap, vWorldXZ.yx * .017 + vec2(.37, .61)).rgb;
+            albedo = mix(groundA, groundB, .34);
+          }
           vec3 sunDirection = normalize(vec3(-.42, .83, .36));
           float sunlight = max(dot(normalize(vWorldNormal), sunDirection), 0.0);
           float soft = .58 + sunlight * .42;
@@ -1837,11 +1954,9 @@ class PrivateRoom {
           color += vec3(.22, .24, .08) * pow(sunlight, 5.0) * .14;
           float fog = smoothstep(170.0, 390.0, distanceToCamera);
           color = mix(color, vec3(.79, .89, .93), fog);
-          if (uOpacity < .01) discard;
-          gl_FragColor = vec4(color, uOpacity);
+          gl_FragColor = vec4(color, 1.0);
         }
       `,
-      transparent: true,
       depthWrite: true,
       side: THREE.DoubleSide
     });
@@ -1906,7 +2021,9 @@ class PrivateRoom {
     const grassMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uOpacity: { value: 0 },
-        uTime: { value: 0 }
+        uTime: { value: 0 },
+        uRiseProgress: { value: 0 },
+        uDoorLandscape: { value: this.skyDoorLandscape }
       },
       vertexShader: `
         attribute vec2 aOffset;
@@ -1916,20 +2033,39 @@ class PrivateRoom {
         attribute float aTint;
         attribute float aBladeTone;
         attribute float aLod;
+        uniform float uOpacity;
         uniform float uTime;
+        uniform float uRiseProgress;
+        uniform vec3 uDoorLandscape;
         varying float vHeight;
         varying float vTint;
         varying float vBladeTone;
         varying float vFog;
         ${hillFunctionGlsl}
+        float emergenceOffset(vec2 p) {
+          float envelope = 4.0 * uRiseProgress * (1.0 - uRiseProgress);
+          float variation = sin(p.x * .013 + sin(p.y * .008) * 1.4) * .058
+            + cos(p.y * .011 - .7) * .046
+            + sin((p.x + p.y) * .019 + 2.1) * .028;
+          return 38.0 * variation * envelope;
+        }
+        float doorLandscapeOffset(vec2 p) {
+          float distanceToDoor = distance(p, uDoorLandscape.xy);
+          float bowl = -5.2 * (1.0 - smoothstep(0.0, 18.0, distanceToDoor));
+          float ridgeDistance = (distanceToDoor - 31.0) / 9.5;
+          float ridge = 8.6 * exp(-ridgeDistance * ridgeDistance);
+          return (bowl + ridge) * uDoorLandscape.z;
+        }
         void main() {
           vec4 center = modelMatrix * vec4(aOffset.x, 0.0, aOffset.y, 1.0);
           float rotation = aRotation;
+          float growth = smoothstep(0.0, 1.0, uOpacity);
           mat2 turn = mat2(cos(rotation), -sin(rotation), sin(rotation), cos(rotation));
-          vec2 localXZ = turn * position.xz * aScale;
+          vec2 localXZ = turn * position.xz * aScale * mix(.2, 1.0, growth);
           vec3 world = vec3(
             center.x + localXZ.x,
-            center.y + hillHeight(center.xz) + position.y * aScale,
+            center.y + hillHeight(center.xz) + emergenceOffset(center.xz)
+              + doorLandscapeOffset(center.xz) + position.y * aScale * growth,
             center.z + localXZ.y
           );
           float tip = uv.y * uv.y;
@@ -1959,13 +2095,12 @@ class PrivateRoom {
           color *= vTint * vBladeTone;
           color += vec3(.10, .12, .025) * pow(vHeight, 4.0);
           color = mix(color, vec3(.79, .89, .93), vFog);
-          if (uOpacity < .01) discard;
-          gl_FragColor = vec4(color, uOpacity);
+          if (uOpacity < .015) discard;
+          gl_FragColor = vec4(color, 1.0);
         }
       `,
       depthTest: true,
       depthWrite: true,
-      transparent: true,
       side: THREE.DoubleSide
     });
 
@@ -2080,7 +2215,9 @@ class PrivateRoom {
     const flowerMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uOpacity: { value: 0 },
-        uTime: { value: 0 }
+        uTime: { value: 0 },
+        uRiseProgress: { value: 0 },
+        uDoorLandscape: { value: this.skyDoorLandscape }
       },
       vertexShader: `
         attribute vec2 aOffset;
@@ -2090,19 +2227,38 @@ class PrivateRoom {
         attribute vec3 aColor;
         attribute float aFlowerPart;
         attribute float aFlowerTone;
+        uniform float uOpacity;
         uniform float uTime;
+        uniform float uRiseProgress;
+        uniform vec3 uDoorLandscape;
         varying vec3 vColor;
         varying float vPart;
         varying float vTone;
         varying float vFog;
         ${hillFunctionGlsl}
+        float emergenceOffset(vec2 p) {
+          float envelope = 4.0 * uRiseProgress * (1.0 - uRiseProgress);
+          float variation = sin(p.x * .013 + sin(p.y * .008) * 1.4) * .058
+            + cos(p.y * .011 - .7) * .046
+            + sin((p.x + p.y) * .019 + 2.1) * .028;
+          return 38.0 * variation * envelope;
+        }
+        float doorLandscapeOffset(vec2 p) {
+          float distanceToDoor = distance(p, uDoorLandscape.xy);
+          float bowl = -5.2 * (1.0 - smoothstep(0.0, 18.0, distanceToDoor));
+          float ridgeDistance = (distanceToDoor - 31.0) / 9.5;
+          float ridge = 8.6 * exp(-ridgeDistance * ridgeDistance);
+          return (bowl + ridge) * uDoorLandscape.z;
+        }
         void main() {
           vec4 center = modelMatrix * vec4(aOffset.x, 0.0, aOffset.y, 1.0);
+          float growth = smoothstep(0.0, 1.0, uOpacity);
           mat2 turn = mat2(cos(aRotation), -sin(aRotation), sin(aRotation), cos(aRotation));
-          vec2 localXZ = turn * position.xz * aScale;
+          vec2 localXZ = turn * position.xz * aScale * mix(.2, 1.0, growth);
           vec3 world = vec3(
             center.x + localXZ.x,
-            center.y + hillHeight(center.xz) + position.y * aScale,
+            center.y + hillHeight(center.xz) + emergenceOffset(center.xz)
+              + doorLandscapeOffset(center.xz) + position.y * aScale * growth,
             center.z + localXZ.y
           );
           float bend = position.y * position.y;
@@ -2130,13 +2286,12 @@ class PrivateRoom {
           vec3 center = vec3(1.0, .62, .055) * vTone;
           vec3 color = vPart < .5 ? stem : (vPart < 1.5 ? petals : center);
           color = mix(color, vec3(.79, .89, .93), vFog);
-          if (uOpacity < .01) discard;
-          gl_FragColor = vec4(color, uOpacity);
+          if (uOpacity < .015) discard;
+          gl_FragColor = vec4(color, 1.0);
         }
       `,
       depthWrite: true,
       depthTest: true,
-      transparent: true,
       side: THREE.DoubleSide
     });
 
@@ -2182,10 +2337,10 @@ class PrivateRoom {
     this.skyMeadowFlowerMaterial = flowerMaterial;
     this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
 
-    const nearGrassCount = this.isTouch ? 1200 : 2900;
-    const mediumGrassCount = this.isTouch ? 1650 : 3800;
-    const farGrassCount = this.isTouch ? 2300 : 5200;
-    const ultraGrassCount = this.isTouch ? 1600 : 3600;
+    const nearGrassCount = this.isTouch ? 1600 : 2900;
+    const mediumGrassCount = this.isTouch ? 2200 : 3800;
+    const farGrassCount = this.isTouch ? 3000 : 5200;
+    const ultraGrassCount = this.isTouch ? 2200 : 3600;
     const flowerCount = this.isTouch ? 56 : 140;
     this.skyMeadowGrassGeometrySets = [
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(nearGrassCount, index, grassBaseGeometry, 0)),
@@ -2194,6 +2349,8 @@ class PrivateRoom {
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(ultraGrassCount, index + 37, ultraGrassBaseGeometry, 3))
     ];
     const flowerGeometries = Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCount, index));
+    this.skyMeadowFlowerGeometries = flowerGeometries;
+    this.skyMeadowFlowerCount = flowerCount;
     this.skyMeadowTileRadius = 5;
     this.skyMeadowTiles = [];
     const meadowTileCount = (this.skyMeadowTileRadius * 2 + 1) ** 2;
@@ -2664,6 +2821,7 @@ class PrivateRoom {
     this.skyMeadowGroundWalkTime = 0;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
+    this.skyDoorLandscape.set(0, 0, 0);
     this.skyMeadowRoot.visible = true;
     if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
     if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
@@ -2780,38 +2938,70 @@ class PrivateRoom {
     if (this.skyDoorSpawned || !this.skyDoorRoot || !this.skyMeadowGrounded) return;
     this.skyDoorSpawned = true;
     this.skyDoorReveal = 0;
-    const direction = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
-    this.skyMeadowDirection.copy(direction);
+    const facing = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
     const trailStartX = this.freeCameraPosition.x;
     const trailStartZ = this.freeCameraPosition.z;
-    let crestDistance = 150;
-    let crestHeight = Number.NEGATIVE_INFINITY;
-    for (let distance = 120; distance <= 240; distance += 4) {
-      const x = this.freeCameraPosition.x + direction.x * distance;
-      const z = this.freeCameraPosition.z + direction.z * distance;
-      const height = this.skyMeadowHeightWorld(x, z);
-      if (height > crestHeight) {
-        crestHeight = height;
-        crestDistance = distance;
+    const viewerHeight = this.skyMeadowHeightWorld(trailStartX, trailStartZ) + this.freeEyeHeight;
+    let placement = null;
+
+    for (let directionIndex = -8; directionIndex <= 8; directionIndex += 1) {
+      const offset = directionIndex * .15;
+      const cosine = Math.cos(offset);
+      const sine = Math.sin(offset);
+      const direction = new THREE.Vector3(
+        facing.x * cosine + facing.z * sine,
+        0,
+        -facing.x * sine + facing.z * cosine
+      ).normalize();
+      let crestDistance = 90;
+      let crestHeight = Number.NEGATIVE_INFINITY;
+      for (let distance = 95; distance <= 205; distance += 5) {
+        const x = trailStartX + direction.x * distance;
+        const z = trailStartZ + direction.z * distance;
+        const height = this.skyMeadowHeightWorld(x, z);
+        if (height > crestHeight) {
+          crestHeight = height;
+          crestDistance = distance;
+        }
+      }
+      let doorDistance = crestDistance + 48;
+      let doorHeight = Number.POSITIVE_INFINITY;
+      const searchEnd = Math.min(300, crestDistance + 92);
+      for (let distance = crestDistance + 34; distance <= searchEnd; distance += 4) {
+        const x = trailStartX + direction.x * distance;
+        const z = trailStartZ + direction.z * distance;
+        const height = this.skyMeadowHeightWorld(x, z);
+        if (height < doorHeight) {
+          doorHeight = height;
+          doorDistance = distance;
+        }
+      }
+      const doorTop = doorHeight + 7.55;
+      const sightlineAtCrest = lerp(viewerHeight, doorTop, crestDistance / doorDistance);
+      const clearance = crestHeight - sightlineAtCrest;
+      const score = clearance - Math.abs(offset) * .22;
+      if (!placement || score > placement.score) {
+        placement = { direction, doorDistance, doorHeight, clearance, score };
       }
     }
-    let doorDistance = crestDistance + 42;
-    let shelteredHeight = Number.POSITIVE_INFINITY;
-    for (let distance = crestDistance + 28; distance <= crestDistance + 70; distance += 3) {
-      const x = this.freeCameraPosition.x + direction.x * distance;
-      const z = this.freeCameraPosition.z + direction.z * distance;
-      const height = this.skyMeadowHeightWorld(x, z);
-      if (height < shelteredHeight) {
-        shelteredHeight = height;
-        doorDistance = distance;
-      }
-    }
-    doorDistance = clamp(doorDistance, 175, 300);
-    const doorX = this.freeCameraPosition.x + direction.x * doorDistance;
-    const doorZ = this.freeCameraPosition.z + direction.z * doorDistance;
+
+    const direction = placement.direction;
+    const doorDistance = clamp(placement.doorDistance, 130, 300);
+    const doorX = trailStartX + direction.x * doorDistance;
+    const doorZ = trailStartZ + direction.z * doorDistance;
+    this.skyDoorLandscape.set(doorX, doorZ, 1);
+    const doorGroundHeight = this.skyMeadowHeightWorld(doorX, doorZ);
+    this.skyMeadowDirection.copy(direction);
+    const ridgeDistance = Math.max(1, doorDistance - 31);
+    const ridgeX = trailStartX + direction.x * ridgeDistance;
+    const ridgeZ = trailStartZ + direction.z * ridgeDistance;
+    const ridgeHeight = this.skyMeadowHeightWorld(ridgeX, ridgeZ);
+    const doorTop = doorGroundHeight + 7.55;
+    const sightlineAtRidge = lerp(viewerHeight, doorTop, ridgeDistance / doorDistance);
+    this.skyDoorOcclusionClearance = ridgeHeight - sightlineAtRidge;
     this.skyDoorRoot.position.set(
       doorX,
-      this.skyMeadowHeightWorld(doorX, doorZ),
+      doorGroundHeight,
       doorZ
     );
     this.skyDoorRoot.rotation.y = Math.atan2(direction.x, direction.z);
@@ -2898,7 +3088,7 @@ class PrivateRoom {
       0,
       1
     );
-    const progress = this.skyMeadowProgress;
+    let progress = this.skyMeadowProgress;
     const contactBaseY = this.skyBaseY
       - this.freeEyeHeight
       - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
@@ -2908,10 +3098,14 @@ class PrivateRoom {
       this.skyMeadowRoot.position.y = this.skyMeadowBaseY
         - this.skyMeadowContactDepth * (1 - progress);
       this.skyMeadowCameraY = this.skyBaseY;
-      if (progress >= 1) {
+      if (progress >= .97) {
+        progress = 1;
+        this.skyMeadowProgress = 1;
         this.skyMeadowGrounded = true;
         this.skyMeadowBaseY = contactBaseY;
         this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
+        this.skyMeadowCameraY = this.skyBaseY;
+        this.lastFootstepIndex = -1;
       }
     } else {
       this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
@@ -2927,15 +3121,29 @@ class PrivateRoom {
     this.skyMeadowTerrain.position.z = Math.round(this.freeCameraPosition.z / 12) * 12;
     this.updateSkyMeadowTiles();
 
-    const terrainOpacity = smoothstep01(clamp((progress - .015) / .47, 0, 1));
-    const plantOpacity = smoothstep01(clamp((progress - .14) / .58, 0, 1));
-    const flowerOpacity = smoothstep01(clamp((progress - .4) / .55, 0, 1));
-    this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = terrainOpacity;
+    const plantGrowth = smoothstep01(clamp((progress - .06) / .62, 0, 1));
+    const flowerGrowth = smoothstep01(clamp((progress - .1) / .72, 0, 1));
+    const flowerPopulation = progress < .08
+      ? 0
+      : Math.max(
+        1,
+        Math.floor(
+          this.skyMeadowFlowerCount
+          * (.12 + smoothstep01(clamp((progress - .08) / .82, 0, 1)) * .88)
+        )
+      );
+    this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = 1;
     this.skyMeadowTerrainMaterial.uniforms.uTime.value = this.elapsed;
-    this.skyMeadowGrassMaterial.uniforms.uOpacity.value = plantOpacity;
+    this.skyMeadowTerrainMaterial.uniforms.uRiseProgress.value = progress;
+    this.skyMeadowGrassMaterial.uniforms.uOpacity.value = plantGrowth;
     this.skyMeadowGrassMaterial.uniforms.uTime.value = this.elapsed;
-    this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = flowerOpacity;
+    this.skyMeadowGrassMaterial.uniforms.uRiseProgress.value = progress;
+    this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = flowerGrowth;
     this.skyMeadowFlowerMaterial.uniforms.uTime.value = this.elapsed;
+    this.skyMeadowFlowerMaterial.uniforms.uRiseProgress.value = progress;
+    this.skyMeadowFlowerGeometries?.forEach((geometry) => {
+      geometry.instanceCount = flowerPopulation;
+    });
 
     if (this.skyDoorSpawned) {
       this.skyDoorReveal = clamp(this.skyDoorReveal + delta / 4.2, 0, 1);
@@ -2965,6 +3173,8 @@ class PrivateRoom {
     uniforms.uRight.value.copy(right);
     uniforms.uUp.value.copy(up);
     uniforms.uMeadowBaseY.value = this.skyMeadowRoot?.position.y ?? this.skyBaseY;
+    uniforms.uMeadowProgress.value = this.skyMeadowProgress;
+    uniforms.uDoorLandscape.value.copy(this.skyDoorLandscape);
     if (this.skyCloudOverlayMaterial) {
       const overlayUniforms = this.skyCloudOverlayMaterial.uniforms;
       overlayUniforms.uTime.value = uniforms.uTime.value;
@@ -2976,6 +3186,8 @@ class PrivateRoom {
       overlayUniforms.uRight.value.copy(right);
       overlayUniforms.uUp.value.copy(up);
       overlayUniforms.uMeadowBaseY.value = uniforms.uMeadowBaseY.value;
+      overlayUniforms.uMeadowProgress.value = uniforms.uMeadowProgress.value;
+      overlayUniforms.uDoorLandscape.value.copy(uniforms.uDoorLandscape.value);
     }
     if (this.skyDoorCloudMaterial) {
       const doorUniforms = this.skyDoorCloudMaterial.uniforms;
@@ -2988,6 +3200,8 @@ class PrivateRoom {
       doorUniforms.uRight.value.copy(right);
       doorUniforms.uUp.value.copy(up);
       doorUniforms.uMeadowBaseY.value = uniforms.uMeadowBaseY.value;
+      doorUniforms.uMeadowProgress.value = uniforms.uMeadowProgress.value;
+      doorUniforms.uDoorLandscape.value.copy(uniforms.uDoorLandscape.value);
       if (this.skyDoorSpawned && this.skyDoorRoot) {
         this.skyDoorWorldPosition ??= new THREE.Vector3();
         this.skyDoorRoot.getWorldPosition(this.skyDoorWorldPosition);
@@ -3027,6 +3241,7 @@ class PrivateRoom {
     this.skyMeadowGroundWalkTime = 0;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
+    this.skyDoorLandscape.set(0, 0, 0);
     this.skyMeadowTileCenterX = Number.NaN;
     this.skyMeadowTileCenterZ = Number.NaN;
     if (this.skyMeadowRoot) this.skyMeadowRoot.visible = false;
