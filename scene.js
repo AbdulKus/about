@@ -107,11 +107,16 @@ class PrivateRoom {
     this.skyMeadowStarted = false;
     this.skyMeadowGrounded = false;
     this.skyMeadowProgress = 0;
+    this.skyMeadowStartDelay = 90;
     this.skyMeadowRiseDuration = 300;
+    this.skyDoorDelay = 90;
     this.skyMeadowBaseY = 0;
     this.skyMeadowCameraY = 0;
     this.skyMeadowGroundWalkTime = 0;
     this.skyMeadowDirection = new THREE.Vector3(0, 0, -1);
+    this.skyMeadowContactDepth = 38;
+    this.skyMeadowCloudDeckHeight = -4;
+    this.skyMeadowTileSize = 104;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
     this.skyMeadowTileCenterX = Number.NaN;
@@ -1631,90 +1636,70 @@ class PrivateRoom {
   }
 
   skyMeadowHeightWorld(x, z) {
-    const broad = Math.sin(x * .018) * 3.25
-      + Math.cos(z * .015 + .8) * 2.75
-      + Math.sin((x + z) * .026 + 1.7) * 1.7;
-    const crossed = Math.sin(x * .047 - .9) * Math.cos(z * .041 + .4) * 1.05;
-    const rolling = Math.sin(Math.hypot(x + 34, z - 27) * .024) * 1.45;
-    return broad + crossed + rolling;
+    const broad = Math.sin(x * .009 + Math.sin(z * .0065) * .82) * 5.4
+      + Math.cos(z * .0076 + .8) * 4.35
+      + Math.sin((x + z) * .0112 + 1.7) * 2.8;
+    const rolling = Math.sin(Math.hypot(x + 54, z - 37) * .0125) * 2.05;
+    const detail = Math.sin(x * .025 - .9) * Math.cos(z * .021 + .4) * .72;
+    return broad + rolling + detail;
   }
 
   createSkyMeadowWorld() {
     this.skyMeadowScene = new THREE.Scene();
-    this.skyMeadowScene.fog = new THREE.Fog(0xc8e3ef, 250, 430);
+    this.skyMeadowScene.fog = new THREE.Fog(0xc9e2ed, 165, 390);
     this.skyMeadowRoot = new THREE.Group();
     this.skyMeadowRoot.visible = false;
     this.skyMeadowScene.add(this.skyMeadowRoot);
     this.skyMeadowMaterials = [];
     this.skyDoorMaterials = [];
 
-    const hemisphere = new THREE.HemisphereLight(0xf1fbff, 0x28451d, 2.5);
+    const hemisphere = new THREE.HemisphereLight(0xf4fbff, 0x294b20, 2.85);
     this.skyMeadowScene.add(hemisphere);
-    const sun = new THREE.DirectionalLight(0xffefbd, 3.65);
+    const sun = new THREE.DirectionalLight(0xffefbd, 3.4);
     sun.position.set(-72, 118, 52);
     this.skyMeadowScene.add(sun);
 
-    const textureCanvas = document.createElement("canvas");
-    textureCanvas.width = textureCanvas.height = 1024;
-    const textureContext = textureCanvas.getContext("2d");
-    const groundGradient = textureContext.createLinearGradient(0, 0, 1024, 1024);
-    groundGradient.addColorStop(0, "#527f37");
-    groundGradient.addColorStop(.46, "#6b963f");
-    groundGradient.addColorStop(1, "#3f702f");
-    textureContext.fillStyle = groundGradient;
-    textureContext.fillRect(0, 0, 1024, 1024);
-    for (let patch = 0; patch < 4200; patch += 1) {
-      const x = Math.random() * 1024;
-      const y = Math.random() * 1024;
-      const radius = random(2, 18);
-      const green = Math.random() > .48;
-      textureContext.fillStyle = green
-        ? "rgba(174,205,103," + random(.018, .075) + ")"
-        : "rgba(20,61,24," + random(.022, .085) + ")";
-      textureContext.beginPath();
-      textureContext.ellipse(x, y, radius, radius * random(.18, .55), random(0, Math.PI), 0, Math.PI * 2);
-      textureContext.fill();
-    }
-    for (let blade = 0; blade < 18500; blade += 1) {
-      const x = Math.random() * 1024;
-      const y = Math.random() * 1024;
-      textureContext.strokeStyle = Math.random() > .56
-        ? "rgba(207,226,137," + random(.025, .12) + ")"
-        : "rgba(12,48,20," + random(.035, .14) + ")";
-      textureContext.lineWidth = random(.35, 1.25);
-      textureContext.beginPath();
-      textureContext.moveTo(x, y);
-      textureContext.quadraticCurveTo(
-        x + random(-2, 2),
-        y - random(2, 6),
-        x + random(-3.5, 3.5),
-        y - random(5, 13)
-      );
-      textureContext.stroke();
-    }
-    const grassTexture = new THREE.CanvasTexture(textureCanvas);
-    grassTexture.colorSpace = THREE.SRGBColorSpace;
-    grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
-    grassTexture.minFilter = THREE.LinearMipmapLinearFilter;
-    grassTexture.magFilter = THREE.LinearFilter;
-    grassTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-
     const hillFunctionGlsl = `
       float hillHeight(vec2 p) {
-        float broad = sin(p.x * .018) * 3.25
-          + cos(p.y * .015 + .8) * 2.75
-          + sin((p.x + p.y) * .026 + 1.7) * 1.7;
-        float crossed = sin(p.x * .047 - .9) * cos(p.y * .041 + .4) * 1.05;
-        float rolling = sin(length(p + vec2(34.0, -27.0)) * .024) * 1.45;
-        return broad + crossed + rolling;
+        float broad = sin(p.x * .009 + sin(p.y * .0065) * .82) * 5.4
+          + cos(p.y * .0076 + .8) * 4.35
+          + sin((p.x + p.y) * .0112 + 1.7) * 2.8;
+        float rolling = sin(length(p + vec2(54.0, -37.0)) * .0125) * 2.05;
+        float detail = sin(p.x * .025 - .9) * cos(p.y * .021 + .4) * .72;
+        return broad + rolling + detail;
       }
     `;
-    const terrainGeometry = new THREE.PlaneGeometry(900, 900, 176, 176);
+    const noiseFunctionGlsl = `
+      float meadowHash(vec2 p) {
+        p = fract(p * vec2(123.34, 345.45));
+        p += dot(p, p + 34.345);
+        return fract(p.x * p.y);
+      }
+      float meadowNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(meadowHash(i), meadowHash(i + vec2(1.0, 0.0)), f.x),
+          mix(meadowHash(i + vec2(0.0, 1.0)), meadowHash(i + vec2(1.0)), f.x),
+          f.y
+        );
+      }
+      float meadowFbm(vec2 p) {
+        float value = meadowNoise(p) * .55;
+        value += meadowNoise(p * 2.03 + 13.7) * .28;
+        value += meadowNoise(p * 4.11 - 7.2) * .17;
+        return value;
+      }
+    `;
+
+    const terrainSegments = this.isTouch ? 220 : 300;
+    const terrainGeometry = new THREE.PlaneGeometry(720, 720, terrainSegments, terrainSegments);
     terrainGeometry.rotateX(-Math.PI / 2);
     const terrainMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uGrassMap: { value: grassTexture },
-        uOpacity: { value: 0 }
+        uOpacity: { value: 0 },
+        uTime: { value: 0 }
       },
       vertexShader: `
         varying vec2 vWorldXZ;
@@ -1725,7 +1710,7 @@ class PrivateRoom {
           vec4 world = modelMatrix * vec4(position, 1.0);
           float baseY = modelMatrix[3].y;
           world.y = baseY + hillHeight(world.xz);
-          float epsilon = .7;
+          float epsilon = .48;
           float leftHeight = hillHeight(world.xz - vec2(epsilon, 0.0));
           float rightHeight = hillHeight(world.xz + vec2(epsilon, 0.0));
           float backHeight = hillHeight(world.xz - vec2(0.0, epsilon));
@@ -1738,30 +1723,36 @@ class PrivateRoom {
       `,
       fragmentShader: `
         precision highp float;
-        uniform sampler2D uGrassMap;
         uniform float uOpacity;
+        uniform float uTime;
         varying vec2 vWorldXZ;
         varying vec3 vWorldNormal;
         varying vec3 vWorldPosition;
+        ${noiseFunctionGlsl}
         void main() {
-          vec2 uvA = vWorldXZ * .017;
-          vec2 uvB = vec2(vWorldXZ.x - vWorldXZ.y, vWorldXZ.x + vWorldXZ.y) * .0057 + .371;
-          vec3 detailA = texture2D(uGrassMap, uvA).rgb;
-          vec3 detailB = texture2D(uGrassMap, uvB).rgb;
-          vec3 albedo = mix(detailA, detailB, .31);
+          float broad = meadowFbm(vWorldXZ * .018);
+          float fine = meadowFbm(vWorldXZ * .087 + vec2(19.2, -8.4));
+          float moss = smoothstep(.34, .77, meadowFbm(vWorldXZ * .034 - 31.0));
+          vec3 deepGreen = vec3(.075, .245, .055);
+          vec3 freshGreen = vec3(.245, .49, .105);
+          vec3 sunGreen = vec3(.42, .61, .16);
+          vec3 albedo = mix(deepGreen, freshGreen, broad);
+          albedo = mix(albedo, sunGreen, moss * .34);
+          albedo *= .88 + fine * .24;
           vec3 sunDirection = normalize(vec3(-.42, .83, .36));
           float sunlight = max(dot(normalize(vWorldNormal), sunDirection), 0.0);
-          float soft = .52 + sunlight * .48;
-          float slopeShade = mix(.8, 1.08, clamp(vWorldNormal.y, 0.0, 1.0));
+          float soft = .58 + sunlight * .42;
+          float slopeShade = mix(.68, 1.08, smoothstep(.7, 1.0, vWorldNormal.y));
           vec3 color = albedo * soft * slopeShade;
-          color += vec3(.16, .18, .07) * pow(sunlight, 5.0) * .19;
+          color += vec3(.22, .24, .08) * pow(sunlight, 5.0) * .14;
           float distanceToCamera = distance(cameraPosition, vWorldPosition);
-          float fog = smoothstep(255.0, 430.0, distanceToCamera);
-          color = mix(color, vec3(.76, .87, .92), fog);
-          gl_FragColor = vec4(color, uOpacity);
+          float fog = smoothstep(170.0, 390.0, distanceToCamera);
+          color = mix(color, vec3(.79, .89, .93), fog);
+          float dither = meadowHash(floor(gl_FragCoord.xy) + floor(uTime * 3.0));
+          if (dither > uOpacity) discard;
+          gl_FragColor = vec4(color, 1.0);
         }
       `,
-      transparent: true,
       depthWrite: true,
       side: THREE.DoubleSide
     });
@@ -1772,63 +1763,155 @@ class PrivateRoom {
     this.skyMeadowTerrainMaterial = terrainMaterial;
     this.skyMeadowMaterials.push(terrainMaterial);
 
-    const tuftCanvas = document.createElement("canvas");
-    tuftCanvas.width = tuftCanvas.height = 128;
-    const tuftContext = tuftCanvas.getContext("2d");
-    tuftContext.lineCap = "round";
-    for (let blade = 0; blade < 28; blade += 1) {
-      const baseX = 64 + random(-38, 38);
-      const baseY = 126;
-      const tipX = baseX + random(-24, 24);
-      const tipY = random(12, 82);
-      const gradient = tuftContext.createLinearGradient(baseX, baseY, tipX, tipY);
-      gradient.addColorStop(0, "rgba(26,73,25,.86)");
-      gradient.addColorStop(.58, "rgba(105,157,61,.94)");
-      gradient.addColorStop(1, "rgba(200,224,130,.18)");
-      tuftContext.strokeStyle = gradient;
-      tuftContext.lineWidth = random(1.2, 3.3);
-      tuftContext.beginPath();
-      tuftContext.moveTo(baseX, baseY);
-      tuftContext.quadraticCurveTo(baseX + random(-9, 9), (baseY + tipY) * .5, tipX, tipY);
-      tuftContext.stroke();
-    }
-    const tuftTexture = new THREE.CanvasTexture(tuftCanvas);
-    tuftTexture.colorSpace = THREE.SRGBColorSpace;
-    tuftTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    const grassBaseGeometry = new THREE.BufferGeometry();
+    const bladePositions = [];
+    const bladeUvs = [];
+    const bladeTones = [];
+    const bladeIndices = [];
+    const addBlade = (angle, offsetX, offsetZ, height, width, bend, tone) => {
+      const first = bladePositions.length / 3;
+      const rightX = Math.cos(angle);
+      const rightZ = -Math.sin(angle);
+      const forwardX = Math.sin(angle);
+      const forwardZ = Math.cos(angle);
+      for (let level = 0; level <= 3; level += 1) {
+        const t = level / 3;
+        const halfWidth = width * (.98 - t * .88);
+        const curve = bend * t * t;
+        [-1, 1].forEach((side) => {
+          bladePositions.push(
+            offsetX + rightX * halfWidth * side + forwardX * curve,
+            height * t,
+            offsetZ + rightZ * halfWidth * side + forwardZ * curve
+          );
+          bladeUvs.push(side < 0 ? 0 : 1, t);
+          bladeTones.push(tone);
+        });
+      }
+      for (let level = 0; level < 3; level += 1) {
+        const row = first + level * 2;
+        bladeIndices.push(row, row + 2, row + 1, row + 2, row + 3, row + 1);
+      }
+    };
+    addBlade(0, -.08, .02, 1.0, .105, .18, .92);
+    addBlade(Math.PI * .5, .08, -.04, .86, .09, -.13, 1.08);
+    addBlade(-.72, -.02, -.08, .72, .085, .11, .78);
+    grassBaseGeometry.setIndex(bladeIndices);
+    grassBaseGeometry.setAttribute("position", new THREE.Float32BufferAttribute(bladePositions, 3));
+    grassBaseGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(bladeUvs, 2));
+    grassBaseGeometry.setAttribute("aBladeTone", new THREE.Float32BufferAttribute(bladeTones, 1));
 
-    const flowerCanvas = document.createElement("canvas");
-    flowerCanvas.width = flowerCanvas.height = 128;
-    const flowerContext = flowerCanvas.getContext("2d");
-    flowerContext.translate(64, 64);
-    flowerContext.shadowColor = "rgba(255,255,255,.45)";
-    flowerContext.shadowBlur = 5;
-    for (let petal = 0; petal < 8; petal += 1) {
-      flowerContext.save();
-      flowerContext.rotate(petal / 8 * Math.PI * 2);
-      const petalGradient = flowerContext.createRadialGradient(0, -24, 2, 0, -24, 25);
-      petalGradient.addColorStop(0, "rgba(255,255,255,.96)");
-      petalGradient.addColorStop(1, "rgba(255,255,255,.12)");
-      flowerContext.fillStyle = petalGradient;
-      flowerContext.beginPath();
-      flowerContext.ellipse(0, -25, 10, 24, 0, 0, Math.PI * 2);
-      flowerContext.fill();
-      flowerContext.restore();
-    }
-    flowerContext.shadowBlur = 0;
-    flowerContext.fillStyle = "#ffe36a";
-    flowerContext.beginPath();
-    flowerContext.arc(0, 0, 13, 0, Math.PI * 2);
-    flowerContext.fill();
-    const flowerTexture = new THREE.CanvasTexture(flowerCanvas);
-    flowerTexture.colorSpace = THREE.SRGBColorSpace;
-    flowerTexture.minFilter = THREE.LinearMipmapLinearFilter;
-
-    const createPlantMaterial = (map, pointScale) => new THREE.ShaderMaterial({
+    const grassMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uMap: { value: map },
+        uOpacity: { value: 0 },
+        uTime: { value: 0 }
+      },
+      vertexShader: `
+        attribute vec2 aOffset;
+        attribute float aScale;
+        attribute float aRotation;
+        attribute float aPhase;
+        attribute float aTint;
+        attribute float aBladeTone;
+        uniform float uTime;
+        varying float vHeight;
+        varying float vTint;
+        varying float vBladeTone;
+        varying float vFog;
+        varying float vDistanceFade;
+        ${hillFunctionGlsl}
+        void main() {
+          vec4 center = modelMatrix * vec4(aOffset.x, 0.0, aOffset.y, 1.0);
+          float rotation = aRotation;
+          mat2 turn = mat2(cos(rotation), -sin(rotation), sin(rotation), cos(rotation));
+          vec2 localXZ = turn * position.xz * aScale;
+          vec3 world = vec3(
+            center.x + localXZ.x,
+            center.y + hillHeight(center.xz) + position.y * aScale,
+            center.z + localXZ.y
+          );
+          float tip = uv.y * uv.y;
+          float gust = sin(uTime * 1.42 + aPhase + center.x * .031 + center.z * .019);
+          world.x += gust * tip * .13 * aScale;
+          world.z += cos(uTime * .93 + aPhase * 1.7) * tip * .045 * aScale;
+          vec4 viewPosition = viewMatrix * world;
+          gl_Position = projectionMatrix * viewPosition;
+          float distanceToCamera = distance(cameraPosition, world);
+          vHeight = uv.y;
+          vTint = aTint;
+          vBladeTone = aBladeTone;
+          vFog = smoothstep(108.0, 158.0, distanceToCamera);
+          vDistanceFade = 1.0 - smoothstep(126.0, 158.0, distanceToCamera);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        uniform float uOpacity;
+        varying float vHeight;
+        varying float vTint;
+        varying float vBladeTone;
+        varying float vFog;
+        varying float vDistanceFade;
+        void main() {
+          float dither = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
+          if (dither > uOpacity * vDistanceFade) discard;
+          vec3 root = vec3(.055, .205, .045);
+          vec3 tip = vec3(.42, .70, .16);
+          vec3 color = mix(root, tip, smoothstep(0.0, 1.0, vHeight));
+          color *= vTint * vBladeTone;
+          color += vec3(.10, .12, .025) * pow(vHeight, 4.0);
+          color = mix(color, vec3(.79, .89, .93), vFog);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      depthTest: true,
+      depthWrite: true,
+      side: THREE.DoubleSide
+    });
+
+    const createGrassGeometry = (count, variant) => {
+      const geometry = new THREE.InstancedBufferGeometry();
+      geometry.setIndex(grassBaseGeometry.index);
+      Object.entries(grassBaseGeometry.attributes).forEach(([name, attribute]) => {
+        geometry.setAttribute(name, attribute);
+      });
+      const offsets = new Float32Array(count * 2);
+      const scales = new Float32Array(count);
+      const rotations = new Float32Array(count);
+      const phases = new Float32Array(count);
+      const tints = new Float32Array(count);
+      let seed = 1709 + variant * 7919;
+      const seeded = () => {
+        seed = seed * 16807 % 2147483647;
+        return (seed - 1) / 2147483646;
+      };
+      const grid = Math.ceil(Math.sqrt(count));
+      const cell = this.skyMeadowTileSize / grid;
+      for (let index = 0; index < count; index += 1) {
+        const column = index % grid;
+        const row = Math.floor(index / grid);
+        offsets[index * 2] = -this.skyMeadowTileSize * .5 + (column + .15 + seeded() * .7) * cell;
+        offsets[index * 2 + 1] = -this.skyMeadowTileSize * .5 + (row + .15 + seeded() * .7) * cell;
+        scales[index] = .7 + seeded() * .9;
+        rotations[index] = seeded() * Math.PI * 2;
+        phases[index] = seeded() * Math.PI * 2;
+        tints[index] = .78 + seeded() * .42;
+      }
+      geometry.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offsets, 2));
+      geometry.setAttribute("aScale", new THREE.InstancedBufferAttribute(scales, 1));
+      geometry.setAttribute("aRotation", new THREE.InstancedBufferAttribute(rotations, 1));
+      geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
+      geometry.setAttribute("aTint", new THREE.InstancedBufferAttribute(tints, 1));
+      geometry.instanceCount = count;
+      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * .76);
+      return geometry;
+    };
+
+    const flowerMaterial = new THREE.ShaderMaterial({
+      uniforms: {
         uOpacity: { value: 0 },
         uTime: { value: 0 },
-        uPointScale: { value: pointScale }
+        uPointScale: { value: this.isTouch ? 112 : 138 }
       },
       vertexShader: `
         attribute float aSize;
@@ -1842,64 +1925,59 @@ class PrivateRoom {
         void main() {
           vec4 world = modelMatrix * vec4(position, 1.0);
           float baseY = modelMatrix[3].y;
-          world.y = baseY + hillHeight(world.xz) + aSize * .39;
-          world.x += sin(uTime * 1.15 + aPhase) * aSize * .035;
+          world.y = baseY + hillHeight(world.xz) + .42 + aSize * .72;
+          world.x += sin(uTime * 1.18 + aPhase) * .035;
           vec4 viewPosition = viewMatrix * world;
           gl_Position = projectionMatrix * viewPosition;
-          gl_PointSize = clamp(aSize * uPointScale / max(1.0, -viewPosition.z), 1.0, 46.0);
+          gl_PointSize = clamp(aSize * uPointScale / max(1.0, -viewPosition.z), 1.6, 22.0);
           vColor = aColor;
-          vFog = smoothstep(180.0, 345.0, -viewPosition.z);
+          vFog = smoothstep(105.0, 154.0, distance(cameraPosition, world.xyz));
         }
       `,
       fragmentShader: `
         precision highp float;
-        uniform sampler2D uMap;
         uniform float uOpacity;
         varying vec3 vColor;
         varying float vFog;
         void main() {
-          vec4 sprite = texture2D(uMap, gl_PointCoord);
-          float alpha = sprite.a * uOpacity;
-          if (alpha < .035) discard;
-          vec3 color = sprite.rgb * vColor;
-          color = mix(color, vec3(.76, .87, .92), vFog);
-          gl_FragColor = vec4(color, alpha * (1.0 - vFog * .72));
+          vec2 p = gl_PointCoord * 2.0 - 1.0;
+          float radius = length(p);
+          float angle = atan(p.y, p.x);
+          float petalEdge = .58 + cos(angle * 5.0) * .19;
+          float petals = smoothstep(petalEdge, petalEdge - .11, radius);
+          float center = smoothstep(.25, .17, radius);
+          float alpha = max(petals, center) * uOpacity * (1.0 - vFog);
+          if (alpha < .04) discard;
+          vec3 petalColor = mix(vColor * .78, vColor * 1.28, 1.0 - radius);
+          vec3 color = mix(petalColor, vec3(1.0, .67, .08), center);
+          color = mix(color, vec3(.79, .89, .93), vFog);
+          gl_FragColor = vec4(color, alpha);
         }
       `,
       transparent: true,
       depthWrite: false,
       depthTest: true,
-      blending: THREE.NormalBlending,
       vertexColors: true
     });
-    const grassMaterial = createPlantMaterial(tuftTexture, 178);
-    const flowerMaterial = createPlantMaterial(flowerTexture, 116);
-    this.skyMeadowGrassMaterial = grassMaterial;
-    this.skyMeadowFlowerMaterial = flowerMaterial;
-    this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
 
-    const createPlantGeometry = (count, variant, flower = false) => {
+    const createFlowerGeometry = (count, variant) => {
       const positions = new Float32Array(count * 3);
       const sizes = new Float32Array(count);
       const phases = new Float32Array(count);
       const colors = new Float32Array(count * 3);
-      let seed = 7291 + variant * 941 + (flower ? 7109 : 0);
+      const palette = [0xfff6d8, 0xffd74f, 0xf69ac0, 0x92b7ff, 0xb69bea, 0xff9a78];
+      let seed = 9323 + variant * 3571;
       const seeded = () => {
-        seed = (seed * 16807) % 2147483647;
+        seed = seed * 16807 % 2147483647;
         return (seed - 1) / 2147483646;
       };
-      const flowerPalette = [0xffd55c, 0xfff5dc, 0xf78bb8, 0x80a4ff, 0xa887ea, 0xff866b];
       for (let index = 0; index < count; index += 1) {
-        positions[index * 3] = (seeded() - .5) * 119;
+        positions[index * 3] = (seeded() - .5) * this.skyMeadowTileSize;
         positions[index * 3 + 1] = 0;
-        positions[index * 3 + 2] = (seeded() - .5) * 119;
-        sizes[index] = flower
-          ? .32 + seeded() * .38
-          : 1.15 + seeded() * 1.15;
+        positions[index * 3 + 2] = (seeded() - .5) * this.skyMeadowTileSize;
+        sizes[index] = .3 + seeded() * .34;
         phases[index] = seeded() * Math.PI * 2;
-        const color = flower
-          ? new THREE.Color(flowerPalette[Math.floor(seeded() * flowerPalette.length)])
-          : new THREE.Color().setHSL(.255 + seeded() * .055, .42 + seeded() * .26, .42 + seeded() * .18);
+        const color = new THREE.Color(palette[Math.floor(seeded() * palette.length)]);
         colors[index * 3] = color.r;
         colors[index * 3 + 1] = color.g;
         colors[index * 3 + 2] = color.b;
@@ -1909,90 +1987,107 @@ class PrivateRoom {
       geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
       geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
       geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
+      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * .76);
       return geometry;
     };
-    const grassGeometries = Array.from({ length: 5 }, (_, index) => createPlantGeometry(1550, index, false));
-    const flowerGeometries = Array.from({ length: 5 }, (_, index) => createPlantGeometry(230, index, true));
+
+    this.skyMeadowGrassMaterial = grassMaterial;
+    this.skyMeadowFlowerMaterial = flowerMaterial;
+    this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
+
+    const grassCount = this.isTouch ? 1850 : 3900;
+    const flowerCount = this.isTouch ? 250 : 520;
+    const grassGeometries = Array.from({ length: 3 }, (_, index) => createGrassGeometry(grassCount, index));
+    const flowerGeometries = Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCount, index));
     this.skyMeadowTiles = [];
-    for (let tile = 0; tile < 25; tile += 1) {
-      const grass = new THREE.Points(grassGeometries[tile % grassGeometries.length], grassMaterial);
-      const flowers = new THREE.Points(flowerGeometries[(tile * 3) % flowerGeometries.length], flowerMaterial);
-      grass.frustumCulled = false;
-      flowers.frustumCulled = false;
+    for (let tile = 0; tile < 9; tile += 1) {
+      const grass = new THREE.Mesh(grassGeometries[tile % grassGeometries.length], grassMaterial);
+      const flowers = new THREE.Points(flowerGeometries[(tile * 2) % flowerGeometries.length], flowerMaterial);
       grass.renderOrder = 2;
       flowers.renderOrder = 3;
       this.skyMeadowRoot.add(grass, flowers);
       this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null });
     }
 
-    const cloudCanvas = document.createElement("canvas");
-    cloudCanvas.width = cloudCanvas.height = 256;
-    const cloudContext = cloudCanvas.getContext("2d");
-    for (let puff = 0; puff < 9; puff += 1) {
-      const x = 128 + Math.cos(puff / 9 * Math.PI * 2) * random(8, 54);
-      const y = 132 + Math.sin(puff / 9 * Math.PI * 2) * random(4, 25);
-      const radius = random(48, 92);
-      const gradient = cloudContext.createRadialGradient(x - radius * .18, y - radius * .2, 2, x, y, radius);
-      gradient.addColorStop(0, "rgba(255,255,255,.84)");
-      gradient.addColorStop(.48, "rgba(245,251,255,.56)");
-      gradient.addColorStop(1, "rgba(224,242,250,0)");
-      cloudContext.fillStyle = gradient;
-      cloudContext.beginPath();
-      cloudContext.arc(x, y, radius, 0, Math.PI * 2);
-      cloudContext.fill();
-    }
-    const meadowCloudTexture = new THREE.CanvasTexture(cloudCanvas);
-    meadowCloudTexture.colorSpace = THREE.SRGBColorSpace;
-    const meadowCloudMaterial = new THREE.SpriteMaterial({
-      map: meadowCloudTexture,
-      color: 0xffffff,
+    const cloudDeckGeometry = new THREE.PlaneGeometry(720, 720, 84, 84);
+    cloudDeckGeometry.rotateX(-Math.PI / 2);
+    const meadowCloudMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uOpacity: { value: 0 }
+      },
+      vertexShader: `
+        varying vec2 vWorldXZ;
+        varying vec3 vWorldPosition;
+        uniform float uTime;
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          world.y += sin(world.x * .021 + uTime * .07) * .42;
+          world.y += cos(world.z * .017 - uTime * .055) * .34;
+          vWorldXZ = world.xz;
+          vWorldPosition = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        uniform float uTime;
+        uniform float uOpacity;
+        varying vec2 vWorldXZ;
+        varying vec3 vWorldPosition;
+        ${noiseFunctionGlsl}
+        void main() {
+          vec2 drift = vec2(uTime * .018, -uTime * .011);
+          float body = meadowFbm(vWorldXZ * .016 + drift);
+          float detail = meadowFbm(vWorldXZ * .047 - drift * 1.8 + 21.4);
+          float cloud = smoothstep(.37, .73, body * .77 + detail * .23);
+          float distanceToCamera = distance(cameraPosition, vWorldPosition);
+          float distanceFade = 1.0 - smoothstep(250.0, 365.0, distanceToCamera);
+          float alpha = (.12 + cloud * .63) * uOpacity * distanceFade;
+          if (alpha < .015) discard;
+          vec3 color = mix(vec3(.78, .88, .93), vec3(1.0, .985, .94), cloud);
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
       transparent: true,
       depthWrite: false,
       depthTest: true,
-      opacity: 0
+      side: THREE.DoubleSide
     });
     this.skyMeadowCloudMaterial = meadowCloudMaterial;
-    this.skyMeadowClouds = [];
-    for (let index = 0; index < 34; index += 1) {
-      const sprite = new THREE.Sprite(meadowCloudMaterial);
-      const size = 18 + Math.random() * 29;
-      sprite.scale.set(size * random(1.35, 2.25), size, 1);
-      this.skyMeadowRoot.add(sprite);
-      this.skyMeadowClouds.push({
-        sprite,
-        angle: Math.random() * Math.PI * 2,
-        radius: 22 + Math.random() * 205,
-        size,
-        phase: Math.random() * Math.PI * 2,
-        speed: random(.018, .055)
-      });
-    }
+    this.skyMeadowCloudDeck = new THREE.Mesh(cloudDeckGeometry, meadowCloudMaterial);
+    this.skyMeadowCloudDeck.renderOrder = 1;
+    this.skyMeadowCloudDeck.frustumCulled = false;
+    this.skyMeadowRoot.add(this.skyMeadowCloudDeck);
     this.skyMeadowMaterials.push(meadowCloudMaterial);
 
     const woodCanvas = document.createElement("canvas");
-    woodCanvas.width = 768;
+    woodCanvas.width = 512;
     woodCanvas.height = 1024;
     const woodContext = woodCanvas.getContext("2d");
-    const plankWidth = woodCanvas.width / 6;
-    for (let plank = 0; plank < 6; plank += 1) {
+    const woodGradient = woodContext.createLinearGradient(0, 0, 512, 0);
+    woodGradient.addColorStop(0, "#4d2412");
+    woodGradient.addColorStop(.22, "#8b512b");
+    woodGradient.addColorStop(.55, "#a5683a");
+    woodGradient.addColorStop(.82, "#74401f");
+    woodGradient.addColorStop(1, "#3b1b0e");
+    woodContext.fillStyle = woodGradient;
+    woodContext.fillRect(0, 0, 512, 1024);
+    const plankWidth = woodCanvas.width / 5;
+    for (let plank = 0; plank < 5; plank += 1) {
       const x = plank * plankWidth;
-      const plankGradient = woodContext.createLinearGradient(x, 0, x + plankWidth, 0);
-      const warmth = plank % 2 ? ["#5a2d19", "#8b5430", "#442015"] : ["#6d3820", "#9d6238", "#4e2718"];
-      plankGradient.addColorStop(0, warmth[0]);
-      plankGradient.addColorStop(.48, warmth[1]);
-      plankGradient.addColorStop(1, warmth[2]);
-      woodContext.fillStyle = plankGradient;
-      woodContext.fillRect(x, 0, plankWidth + 1, 1024);
-      woodContext.fillStyle = "rgba(20,8,3,.58)";
-      woodContext.fillRect(x, 0, 2.2, 1024);
-      for (let grain = 0; grain < 190; grain += 1) {
+      woodContext.fillStyle = "rgba(29,11,4,.34)";
+      woodContext.fillRect(x, 0, 2, 1024);
+      woodContext.fillStyle = "rgba(255,190,111,.08)";
+      woodContext.fillRect(x + 2, 0, 1, 1024);
+      for (let grain = 0; grain < 120; grain += 1) {
         const gx = x + random(4, plankWidth - 4);
         const gy = random(-30, 1050);
-        const length = random(18, 135);
+        const length = random(28, 170);
         woodContext.strokeStyle = Math.random() > .5
-          ? "rgba(248,176,102," + random(.018, .09) + ")"
-          : "rgba(27,8,3," + random(.03, .13) + ")";
-        woodContext.lineWidth = random(.35, 1.8);
+          ? "rgba(255,188,104," + random(.025, .12) + ")"
+          : "rgba(24,7,2," + random(.04, .17) + ")";
+        woodContext.lineWidth = random(.5, 2.1);
         woodContext.beginPath();
         woodContext.moveTo(gx, gy);
         woodContext.bezierCurveTo(
@@ -2005,22 +2100,33 @@ class PrivateRoom {
         );
         woodContext.stroke();
       }
-      for (let knot = 0; knot < 5; knot += 1) {
+      for (let knot = 0; knot < 4; knot += 1) {
         const kx = x + random(18, plankWidth - 18);
         const ky = random(40, 980);
-        woodContext.strokeStyle = "rgba(38,12,5,.42)";
-        woodContext.lineWidth = random(2, 4);
-        woodContext.beginPath();
-        woodContext.ellipse(kx, ky, random(7, 16), random(15, 30), random(-.2, .2), 0, Math.PI * 2);
-        woodContext.stroke();
+        for (let ring = 0; ring < 3; ring += 1) {
+          woodContext.strokeStyle = `rgba(35,10,3,${.34 - ring * .075})`;
+          woodContext.lineWidth = 1.4;
+          woodContext.beginPath();
+          woodContext.ellipse(kx, ky, 5 + ring * 5, 12 + ring * 7, random(-.16, .16), 0, Math.PI * 2);
+          woodContext.stroke();
+        }
       }
     }
     const doorTexture = new THREE.CanvasTexture(woodCanvas);
     doorTexture.colorSpace = THREE.SRGBColorSpace;
-    doorTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    const doorBump = doorTexture.clone();
+    doorTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    doorTexture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+
+    const bumpCanvas = document.createElement("canvas");
+    bumpCanvas.width = 512;
+    bumpCanvas.height = 1024;
+    const bumpContext = bumpCanvas.getContext("2d");
+    bumpContext.filter = "grayscale(1) contrast(1.45)";
+    bumpContext.drawImage(woodCanvas, 0, 0);
+    bumpContext.filter = "none";
+    const doorBump = new THREE.CanvasTexture(bumpCanvas);
     doorBump.colorSpace = THREE.NoColorSpace;
-    doorBump.needsUpdate = true;
+    doorBump.minFilter = THREE.LinearMipmapLinearFilter;
 
     this.skyDoorRoot = new THREE.Group();
     this.skyDoorRoot.visible = false;
@@ -2029,87 +2135,120 @@ class PrivateRoom {
       color: 0x8d5934,
       map: doorTexture,
       bumpMap: doorBump,
-      bumpScale: .18,
-      roughness: .62,
-      clearcoat: .12,
-      clearcoatRoughness: .64,
+      bumpScale: .11,
+      roughness: .58,
+      clearcoat: .16,
+      clearcoatRoughness: .72,
       transparent: true,
       opacity: 0
     });
     const panelMaterial = doorMaterial.clone();
-    panelMaterial.color = new THREE.Color(0x704023);
+    panelMaterial.color = new THREE.Color(0x704326);
     const frameMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a2a19,
+      color: 0x57321d,
       map: doorTexture,
       bumpMap: doorBump,
-      bumpScale: .13,
-      roughness: .72,
+      bumpScale: .08,
+      roughness: .67,
       transparent: true,
       opacity: 0
     });
     const brassMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd1aa4f,
-      emissive: 0x4a2b08,
-      emissiveIntensity: .55,
-      roughness: .24,
-      metalness: .86,
+      color: 0xd7ad4f,
+      emissive: 0x3b2306,
+      emissiveIntensity: .36,
+      roughness: .2,
+      metalness: .9,
       transparent: true,
       opacity: 0
     });
     this.skyDoorMaterials.push(doorMaterial, panelMaterial, frameMaterial, brassMaterial);
 
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(3.85, 7.0, .38, 4, 10, 2), doorMaterial);
-    slab.position.y = 3.56;
+    const doorShape = new THREE.Shape();
+    doorShape.moveTo(-1.82, 0);
+    doorShape.lineTo(-1.82, 5.48);
+    doorShape.bezierCurveTo(-1.82, 6.52, -.98, 7.3, 0, 7.36);
+    doorShape.bezierCurveTo(.98, 7.3, 1.82, 6.52, 1.82, 5.48);
+    doorShape.lineTo(1.82, 0);
+    doorShape.closePath();
+    const slabGeometry = new THREE.ExtrudeGeometry(doorShape, {
+      depth: .34,
+      bevelEnabled: true,
+      bevelSegments: 3,
+      bevelSize: .075,
+      bevelThickness: .06,
+      curveSegments: 18
+    });
+    slabGeometry.translate(0, 0, -.17);
+    const slabPositions = slabGeometry.getAttribute("position");
+    const slabUvs = slabGeometry.getAttribute("uv");
+    for (let index = 0; index < slabPositions.count; index += 1) {
+      slabUvs.setXY(
+        index,
+        clamp((slabPositions.getX(index) + 1.9) / 3.8, 0, 1),
+        clamp(slabPositions.getY(index) / 7.42, 0, 1)
+      );
+    }
+    slabUvs.needsUpdate = true;
+    const slab = new THREE.Mesh(slabGeometry, doorMaterial);
     this.skyDoorRoot.add(slab);
-    [-2.15, 2.15].forEach((x) => {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(.58, 7.85, .78), frameMaterial);
-      post.position.set(x, 3.92, 0);
+
+    [-2.1, 2.1].forEach((x) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(.48, 5.72, .68, 2, 12, 2), frameMaterial);
+      post.position.set(x, 2.86, .02);
       this.skyDoorRoot.add(post);
     });
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.86, .66, .88), frameMaterial);
-    lintel.position.y = 7.7;
-    this.skyDoorRoot.add(lintel);
-    const crown = new THREE.Mesh(new THREE.BoxGeometry(5.35, .22, 1), brassMaterial);
-    crown.position.y = 8.08;
-    this.skyDoorRoot.add(crown);
-    const step = new THREE.Mesh(new THREE.BoxGeometry(5.45, .3, 1.9), frameMaterial);
-    step.position.set(0, .06, .14);
+    const archPoints = [];
+    for (let segment = 0; segment <= 24; segment += 1) {
+      const angle = Math.PI - segment / 24 * Math.PI;
+      archPoints.push(new THREE.Vector3(Math.cos(angle) * 2.1, 5.47 + Math.sin(angle) * 2.08, .02));
+    }
+    const archCurve = new THREE.CatmullRomCurve3(archPoints);
+    const arch = new THREE.Mesh(new THREE.TubeGeometry(archCurve, 48, .25, 8, false), frameMaterial);
+    this.skyDoorRoot.add(arch);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(4.92, .28, 1.55, 6, 2, 3), frameMaterial);
+    step.position.set(0, .02, .12);
     this.skyDoorRoot.add(step);
 
     [-1, 1].forEach((faceSign) => {
-      [-1, 1].forEach((column) => {
-        [2.05, 5.05].forEach((y) => {
-          const panel = new THREE.Mesh(new THREE.BoxGeometry(1.38, 2.18, .12), panelMaterial);
-          panel.position.set(column * .91, y, faceSign * .245);
-          this.skyDoorRoot.add(panel);
-          const panelTop = new THREE.Mesh(new THREE.BoxGeometry(1.58, .1, .16), brassMaterial);
-          panelTop.position.set(column * .91, y + 1.04, faceSign * .31);
-          this.skyDoorRoot.add(panelTop);
-          const panelBottom = panelTop.clone();
-          panelBottom.position.y = y - 1.04;
-          this.skyDoorRoot.add(panelBottom);
+      [[2.0, 1.85], [4.58, 1.72]].forEach(([y, height]) => {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(2.72, height, .075, 5, 5, 1), panelMaterial);
+        panel.position.set(0, y, faceSign * .205);
+        this.skyDoorRoot.add(panel);
+        [-1, 1].forEach((xSign) => {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(.095, height + .18, .09), frameMaterial);
+          rail.position.set(xSign * 1.42, y, faceSign * .26);
+          this.skyDoorRoot.add(rail);
+        });
+        [-1, 1].forEach((ySign) => {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(2.94, .095, .09), frameMaterial);
+          rail.position.set(0, y + ySign * (height * .5 + .045), faceSign * .26);
+          this.skyDoorRoot.add(rail);
         });
       });
-      const handlePlate = new THREE.Mesh(new THREE.BoxGeometry(.25, .8, .09), brassMaterial);
-      handlePlate.position.set(1.28, 3.48, faceSign * .285);
+
+      const handlePlate = new THREE.Mesh(new THREE.CapsuleGeometry(.13, .5, 5, 12), brassMaterial);
+      handlePlate.position.set(1.16, 3.22, faceSign * .27);
+      handlePlate.scale.set(.72, 1, .25);
       this.skyDoorRoot.add(handlePlate);
-      const handle = new THREE.Mesh(new THREE.CylinderGeometry(.055, .065, .56, 12), brassMaterial);
+      const hub = new THREE.Mesh(new THREE.SphereGeometry(.15, 18, 12), brassMaterial);
+      hub.position.set(1.16, 3.35, faceSign * .38);
+      this.skyDoorRoot.add(hub);
+      const spindle = new THREE.Mesh(new THREE.CylinderGeometry(.055, .055, .28, 12), brassMaterial);
+      spindle.rotation.x = Math.PI / 2;
+      spindle.position.set(1.16, 3.35, faceSign * .31);
+      this.skyDoorRoot.add(spindle);
+      const handle = new THREE.Mesh(new THREE.CapsuleGeometry(.07, .42, 5, 12), brassMaterial);
       handle.rotation.z = Math.PI / 2;
-      handle.position.set(1.5, 3.48, faceSign * .36);
+      handle.position.set(1.4, 3.35, faceSign * .49);
       this.skyDoorRoot.add(handle);
-      const handleEnd = new THREE.Mesh(new THREE.SphereGeometry(.09, 12, 8), brassMaterial);
-      handleEnd.position.set(1.78, 3.48, faceSign * .36);
-      this.skyDoorRoot.add(handleEnd);
-    });
-    [-1, 1].forEach((faceSign) => {
-      for (let hinge = 0; hinge < 3; hinge += 1) {
-        const hingeMesh = new THREE.Mesh(new THREE.BoxGeometry(.12, .48, .075), brassMaterial);
-        hingeMesh.position.set(-1.88, 1.35 + hinge * 2.2, faceSign * .29);
-        this.skyDoorRoot.add(hingeMesh);
-      }
+      const keyhole = new THREE.Mesh(new THREE.CylinderGeometry(.045, .045, .045, 12), brassMaterial);
+      keyhole.rotation.x = Math.PI / 2;
+      keyhole.position.set(1.16, 2.91, faceSign * .335);
+      this.skyDoorRoot.add(keyhole);
     });
     this.skyDoorLight = new THREE.PointLight(0xffd98a, 0, 28, 1.8);
-    this.skyDoorLight.position.set(0, 4.2, 1.4);
+    this.skyDoorLight.position.set(0, 4.4, 1.2);
     this.skyDoorRoot.add(this.skyDoorLight);
 
     const makeWing = (side, lower) => {
@@ -2128,42 +2267,67 @@ class PrivateRoom {
         lower ? -.02 : .03,
         side * .22,
         lower ? .05 : -.03,
-        0,
-        0
+          0,
+          0
       );
-      return new THREE.ShapeGeometry(shape, 10);
+      const geometry = new THREE.ShapeGeometry(shape, 16);
+      geometry.computeBoundingBox();
+      const bounds = geometry.boundingBox;
+      const positions = geometry.getAttribute("position");
+      const uvs = geometry.getAttribute("uv");
+      const width = Math.max(.001, bounds.max.x - bounds.min.x);
+      const height = Math.max(.001, bounds.max.y - bounds.min.y);
+      for (let index = 0; index < positions.count; index += 1) {
+        uvs.setXY(
+          index,
+          (positions.getX(index) - bounds.min.x) / width,
+          (positions.getY(index) - bounds.min.y) / height
+        );
+      }
+      uvs.needsUpdate = true;
+      geometry.rotateX(Math.PI / 2);
+      return geometry;
     };
     const upperRightGeometry = makeWing(1, false);
     const upperLeftGeometry = makeWing(-1, false);
     const lowerRightGeometry = makeWing(1, true);
     const lowerLeftGeometry = makeWing(-1, true);
     const wingTextureCanvas = document.createElement("canvas");
-    wingTextureCanvas.width = wingTextureCanvas.height = 256;
+    wingTextureCanvas.width = wingTextureCanvas.height = 384;
     const wingTextureContext = wingTextureCanvas.getContext("2d");
-    const wingGlow = wingTextureContext.createRadialGradient(32, 224, 4, 118, 124, 172);
-    wingGlow.addColorStop(0, "rgba(255,255,255,.98)");
-    wingGlow.addColorStop(.58, "rgba(255,255,255,.86)");
-    wingGlow.addColorStop(1, "rgba(255,255,255,.18)");
+    const wingGlow = wingTextureContext.createRadialGradient(48, 330, 8, 178, 182, 260);
+    wingGlow.addColorStop(0, "rgba(255,255,255,1)");
+    wingGlow.addColorStop(.5, "rgba(255,252,239,.92)");
+    wingGlow.addColorStop(1, "rgba(255,255,255,.64)");
     wingTextureContext.fillStyle = wingGlow;
-    wingTextureContext.fillRect(0, 0, 256, 256);
-    wingTextureContext.strokeStyle = "rgba(50,24,35,.58)";
-    wingTextureContext.lineWidth = 4;
+    wingTextureContext.fillRect(0, 0, 384, 384);
+    wingTextureContext.strokeStyle = "rgba(39,24,28,.62)";
+    wingTextureContext.lineWidth = 5;
     wingTextureContext.lineCap = "round";
-    [[26, 225, 202, 48], [28, 226, 218, 108], [30, 224, 190, 178], [31, 222, 114, 30]].forEach((vein) => {
+    [[38, 334, 302, 58], [39, 335, 331, 146], [41, 333, 280, 280], [43, 331, 162, 36]].forEach((vein) => {
       wingTextureContext.beginPath();
       wingTextureContext.moveTo(vein[0], vein[1]);
-      wingTextureContext.quadraticCurveTo(112, 145, vein[2], vein[3]);
+      wingTextureContext.quadraticCurveTo(170, 205, vein[2], vein[3]);
       wingTextureContext.stroke();
     });
-    wingTextureContext.strokeStyle = "rgba(255,255,255,.42)";
-    wingTextureContext.lineWidth = 5;
-    wingTextureContext.strokeRect(4, 4, 248, 248);
+    wingTextureContext.fillStyle = "rgba(45,24,31,.62)";
+    [[286, 80, 26], [316, 165, 18], [247, 252, 15]].forEach(([x, y, radius]) => {
+      wingTextureContext.beginPath();
+      wingTextureContext.arc(x, y, radius, 0, Math.PI * 2);
+      wingTextureContext.fill();
+      wingTextureContext.fillStyle = "rgba(255,244,214,.72)";
+      wingTextureContext.beginPath();
+      wingTextureContext.arc(x, y, radius * .48, 0, Math.PI * 2);
+      wingTextureContext.fill();
+      wingTextureContext.fillStyle = "rgba(45,24,31,.62)";
+    });
     const wingTexture = new THREE.CanvasTexture(wingTextureCanvas);
     wingTexture.colorSpace = THREE.SRGBColorSpace;
     wingTexture.minFilter = THREE.LinearMipmapLinearFilter;
+    wingTexture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
 
-    const butterflyCount = 28;
-    const wingMaterial = new THREE.MeshBasicMaterial({
+    const butterflyCount = this.isTouch ? 12 : 20;
+    const wingMaterial = new THREE.MeshPhysicalMaterial({
       color: 0xffffff,
       map: wingTexture,
       vertexColors: true,
@@ -2171,11 +2335,13 @@ class PrivateRoom {
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      toneMapped: false
+      roughness: .52,
+      sheen: .45,
+      sheenColor: new THREE.Color(0xffffff)
     });
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x241816,
-      roughness: .7,
+      color: 0x241713,
+      roughness: .76,
       transparent: true,
       opacity: 0
     });
@@ -2185,8 +2351,11 @@ class PrivateRoom {
       new THREE.InstancedMesh(lowerRightGeometry, wingMaterial, butterflyCount),
       new THREE.InstancedMesh(lowerLeftGeometry, wingMaterial, butterflyCount)
     ];
-    this.skyButterflyBody = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(.035, .055, .42, 7),
+    const bodyGeometry = new THREE.CylinderGeometry(.035, .055, .48, 8);
+    bodyGeometry.rotateX(Math.PI / 2);
+    this.skyButterflyBody = new THREE.InstancedMesh(bodyGeometry, bodyMaterial, butterflyCount);
+    this.skyButterflyHead = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(.08, 10, 7),
       bodyMaterial,
       butterflyCount
     );
@@ -2199,9 +2368,14 @@ class PrivateRoom {
     });
     this.skyButterflyBody.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.skyButterflyBody.frustumCulled = false;
+    this.skyButterflyHead.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.skyButterflyHead.frustumCulled = false;
     this.skyButterflyAntennae = [-1, 1].map(() => {
+      const antennaGeometry = new THREE.CylinderGeometry(.007, .012, .34, 5);
+      antennaGeometry.rotateX(-Math.PI / 2);
+      antennaGeometry.translate(0, 0, -.17);
       const antenna = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(.008, .013, .34, 5),
+        antennaGeometry,
         bodyMaterial,
         butterflyCount
       );
@@ -2211,8 +2385,9 @@ class PrivateRoom {
       return antenna;
     });
     this.skyButterflyGroup.add(this.skyButterflyBody);
+    this.skyButterflyGroup.add(this.skyButterflyHead);
     this.skyMeadowRoot.add(this.skyButterflyGroup);
-    const butterflyPalette = [0xffc536, 0x67b8ff, 0xf073b8, 0xf9f0de, 0x9379ec, 0xff7b59];
+    const butterflyPalette = [0xf6c944, 0x72b7ef, 0xe981ae, 0xf4ead0, 0x9b86d8, 0xf08a61];
     for (let index = 0; index < butterflyCount; index += 1) {
       const color = new THREE.Color(butterflyPalette[index % butterflyPalette.length]);
       this.skyButterflyMeshes.forEach((mesh) => mesh.setColorAt(index, color));
@@ -2222,13 +2397,18 @@ class PrivateRoom {
     });
     this.skyButterflies = Array.from({ length: butterflyCount }, (_, index) => ({
       phase: index * 2.399 + Math.random() * .7,
-      radius: 2.5 + Math.random() * 8.5,
-      height: 1.2 + Math.random() * 7,
-      speed: .2 + Math.random() * .4,
-      scale: .62 + Math.random() * .42
+      radius: 3.5 + Math.random() * 9.5,
+      height: 1.4 + Math.random() * 6.8,
+      speed: .18 + Math.random() * .32,
+      scale: .72 + Math.random() * .42
     }));
     this.skyDoorMaterials.push(wingMaterial, bodyMaterial);
     this.skyButterflyDummy = new THREE.Object3D();
+    this.skyButterflyEuler = new THREE.Euler(0, 0, 0, "YXZ");
+    this.skyButterflyOrientation = new THREE.Quaternion();
+    this.skyButterflyAdjustment = new THREE.Quaternion();
+    this.skyButterflyOffset = new THREE.Vector3();
+    this.skyButterflyLocalAxis = new THREE.Vector3(0, 0, 1);
   }
 
   startSkyMeadowTransition() {
@@ -2243,13 +2423,20 @@ class PrivateRoom {
     if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
     if (this.skyButterflyGroup) this.skyButterflyGroup.visible = false;
     this.skyMeadowCameraY = this.skyBaseY;
+    this.skyMeadowBaseY = this.skyBaseY
+      - this.freeEyeHeight
+      - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
+    this.skyMeadowCloudDeckHeight = this.skyMeadowHeightWorld(
+      this.freeCameraPosition.x,
+      this.freeCameraPosition.z
+    ) - 4.2;
     this.skyMeadowTileCenterX = Number.NaN;
     this.skyMeadowTileCenterZ = Number.NaN;
   }
 
   updateSkyMeadowTiles() {
     if (!this.skyMeadowTiles?.length) return;
-    const tileSize = 120;
+    const tileSize = this.skyMeadowTileSize;
     const centerX = Math.floor(this.freeCameraPosition.x / tileSize);
     const centerZ = Math.floor(this.freeCameraPosition.z / tileSize);
     if (centerX === this.skyMeadowTileCenterX && centerZ === this.skyMeadowTileCenterZ) return;
@@ -2257,8 +2444,8 @@ class PrivateRoom {
     this.skyMeadowTileCenterZ = centerZ;
     const desired = [];
     const desiredKeys = new Set();
-    for (let offsetZ = -2; offsetZ <= 2; offsetZ += 1) {
-      for (let offsetX = -2; offsetX <= 2; offsetX += 1) {
+    for (let offsetZ = -1; offsetZ <= 1; offsetZ += 1) {
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
         const tileX = centerX + offsetX;
         const tileZ = centerZ + offsetZ;
         const key = tileX + ":" + tileZ;
@@ -2290,9 +2477,9 @@ class PrivateRoom {
     this.skyDoorReveal = 0;
     const direction = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
     this.skyMeadowDirection.copy(direction);
-    let crestDistance = 78;
+    let crestDistance = 72;
     let crestHeight = Number.NEGATIVE_INFINITY;
-    for (let distance = 70; distance <= 145; distance += 5) {
+    for (let distance = 62; distance <= 138; distance += 3) {
       const x = this.freeCameraPosition.x + direction.x * distance;
       const z = this.freeCameraPosition.z + direction.z * distance;
       const height = this.skyMeadowHeightWorld(x, z);
@@ -2301,7 +2488,18 @@ class PrivateRoom {
         crestDistance = distance;
       }
     }
-    const doorDistance = Math.min(178, crestDistance + 34);
+    let doorDistance = crestDistance + 24;
+    let shelteredHeight = Number.POSITIVE_INFINITY;
+    for (let distance = crestDistance + 18; distance <= crestDistance + 44; distance += 2) {
+      const x = this.freeCameraPosition.x + direction.x * distance;
+      const z = this.freeCameraPosition.z + direction.z * distance;
+      const height = this.skyMeadowHeightWorld(x, z);
+      if (height < shelteredHeight) {
+        shelteredHeight = height;
+        doorDistance = distance;
+      }
+    }
+    doorDistance = clamp(doorDistance, 86, 176);
     const doorX = this.freeCameraPosition.x + direction.x * doorDistance;
     const doorZ = this.freeCameraPosition.z + direction.z * doorDistance;
     this.skyDoorRoot.position.set(
@@ -2327,31 +2525,49 @@ class PrivateRoom {
         terrainY + .7,
         door.y + record.height + Math.sin(angle * 2.3 + record.phase) * .65
       );
-      const yaw = -angle + Math.PI * .5;
-      const flap = Math.sin(this.elapsed * (10.5 + index % 6) + record.phase) * 1.08;
+      const velocityX = -Math.sin(angle) * record.radius;
+      const velocityZ = Math.cos(angle) * record.radius * .64;
+      const yaw = Math.atan2(-velocityX, -velocityZ);
+      const pitch = Math.sin(angle * 1.7 + record.phase) * .09;
+      const bank = Math.sin(angle + record.phase) * .2;
+      const flap = .2 + (.5 + .5 * Math.sin(this.elapsed * (11.5 + index % 5) + record.phase)) * .92;
       const scale = record.scale * (.92 + Math.sin(angle * 1.7) * .08);
+      const orientation = this.skyButterflyOrientation;
+      orientation.setFromEuler(this.skyButterflyEuler.set(pitch, yaw, bank, "YXZ"));
       const setWing = (mesh, flapAmount) => {
         dummy.position.set(x, y, z);
-        dummy.rotation.set(Math.sin(angle * 1.3) * .12, yaw + flapAmount, Math.cos(angle) * .08);
+        dummy.quaternion.copy(orientation).multiply(
+          this.skyButterflyAdjustment.setFromAxisAngle(this.skyButterflyLocalAxis, flapAmount)
+        );
         dummy.scale.setScalar(scale);
         dummy.updateMatrix();
         mesh.setMatrixAt(index, dummy.matrix);
       };
       setWing(this.skyButterflyMeshes[0], flap);
       setWing(this.skyButterflyMeshes[1], -flap);
-      setWing(this.skyButterflyMeshes[2], flap * .72);
-      setWing(this.skyButterflyMeshes[3], -flap * .72);
+      setWing(this.skyButterflyMeshes[2], flap * .78);
+      setWing(this.skyButterflyMeshes[3], -flap * .78);
       dummy.position.set(x, y, z);
-      dummy.rotation.set(0, yaw, Math.sin(angle) * .18);
+      dummy.quaternion.copy(orientation);
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       this.skyButterflyBody.setMatrixAt(index, dummy.matrix);
+
+      this.skyButterflyOffset.set(0, .015, -.3).applyQuaternion(orientation).multiplyScalar(scale);
+      dummy.position.set(x, y, z).add(this.skyButterflyOffset);
+      dummy.quaternion.copy(orientation);
+      dummy.scale.setScalar(scale);
+      dummy.updateMatrix();
+      this.skyButterflyHead.setMatrixAt(index, dummy.matrix);
+
       this.skyButterflyAntennae.forEach((antenna, antennaIndex) => {
         const side = antennaIndex ? 1 : -1;
-        const sideX = Math.cos(yaw) * side * .075;
-        const sideZ = -Math.sin(yaw) * side * .075;
-        dummy.position.set(x + sideX, y + .29 * scale, z + sideZ);
-        dummy.rotation.set(.18, yaw, side * .58);
+        this.skyButterflyOffset.set(side * .045, .04, -.31).applyQuaternion(orientation).multiplyScalar(scale);
+        dummy.position.set(x, y, z).add(this.skyButterflyOffset);
+        this.skyButterflyAdjustment.setFromEuler(
+          this.skyButterflyEuler.set(-.24, side * .28, 0, "YXZ")
+        );
+        dummy.quaternion.copy(orientation).multiply(this.skyButterflyAdjustment);
         dummy.scale.setScalar(scale);
         dummy.updateMatrix();
         antenna.setMatrixAt(index, dummy.matrix);
@@ -2361,6 +2577,7 @@ class PrivateRoom {
       mesh.instanceMatrix.needsUpdate = true;
     });
     this.skyButterflyBody.instanceMatrix.needsUpdate = true;
+    this.skyButterflyHead.instanceMatrix.needsUpdate = true;
     this.skyButterflyAntennae.forEach((antenna) => {
       antenna.instanceMatrix.needsUpdate = true;
     });
@@ -2374,13 +2591,14 @@ class PrivateRoom {
       1
     );
     const progress = this.skyMeadowProgress;
-    const rise = progress * progress * (3 - 2 * progress);
     const contactBaseY = this.skyBaseY
       - this.freeEyeHeight
       - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
 
     if (!this.skyMeadowGrounded) {
-      this.skyMeadowRoot.position.y = contactBaseY - 46 * (1 - rise);
+      this.skyMeadowBaseY = damp(this.skyMeadowBaseY, contactBaseY, .62, delta);
+      this.skyMeadowRoot.position.y = this.skyMeadowBaseY
+        - this.skyMeadowContactDepth * (1 - progress);
       this.skyMeadowCameraY = this.skyBaseY;
       if (progress >= 1) {
         this.skyMeadowGrounded = true;
@@ -2390,36 +2608,40 @@ class PrivateRoom {
     } else {
       this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
       if (movingOnSky) this.skyMeadowGroundWalkTime += delta;
-      if (this.skyMeadowGroundWalkTime >= 105) this.spawnSkyDoor();
+      if (this.skyMeadowGroundWalkTime >= this.skyDoorDelay) this.spawnSkyDoor();
       const groundEye = this.skyMeadowBaseY
         + this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z)
         + this.freeEyeHeight;
       this.skyMeadowCameraY = damp(this.skyMeadowCameraY, groundEye, 6.4, delta);
     }
 
-    this.skyMeadowTerrain.position.x = this.freeCameraPosition.x;
-    this.skyMeadowTerrain.position.z = this.freeCameraPosition.z;
+    this.skyMeadowTerrain.position.x = Math.round(this.freeCameraPosition.x / 12) * 12;
+    this.skyMeadowTerrain.position.z = Math.round(this.freeCameraPosition.z / 12) * 12;
+    this.skyMeadowCloudDeck.position.x = this.freeCameraPosition.x;
+    this.skyMeadowCloudDeck.position.z = this.freeCameraPosition.z;
+    const localHillHeight = this.skyMeadowHeightWorld(
+      this.freeCameraPosition.x,
+      this.freeCameraPosition.z
+    );
+    this.skyMeadowCloudDeckHeight = damp(
+      this.skyMeadowCloudDeckHeight,
+      localHillHeight - 4.2,
+      .22,
+      delta
+    );
+    this.skyMeadowCloudDeck.position.y = this.skyMeadowCloudDeckHeight;
     this.updateSkyMeadowTiles();
 
-    const terrainOpacity = clamp(progress / .16, 0, 1);
-    const plantOpacity = clamp((progress - .06) / .28, 0, 1);
+    const terrainOpacity = clamp(progress / .12, 0, 1);
+    const plantOpacity = clamp((progress - .035) / .18, 0, 1);
     this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = terrainOpacity;
+    this.skyMeadowTerrainMaterial.uniforms.uTime.value = this.elapsed;
     this.skyMeadowGrassMaterial.uniforms.uOpacity.value = plantOpacity;
     this.skyMeadowGrassMaterial.uniforms.uTime.value = this.elapsed;
     this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = plantOpacity;
     this.skyMeadowFlowerMaterial.uniforms.uTime.value = this.elapsed;
-    this.skyMeadowCloudMaterial.opacity = clamp((progress - .1) / .25, 0, .88);
-
-    this.skyMeadowClouds.forEach((record, index) => {
-      const angle = record.angle + this.elapsed * record.speed;
-      const x = this.freeCameraPosition.x + Math.cos(angle) * record.radius;
-      const z = this.freeCameraPosition.z + Math.sin(angle) * record.radius * .78;
-      const touchHeight = this.skyMeadowHeightWorld(x, z)
-        + record.size * .51
-        + .45
-        + Math.sin(this.elapsed * .14 + record.phase + index) * .18;
-      record.sprite.position.set(x, touchHeight, z);
-    });
+    this.skyMeadowCloudMaterial.uniforms.uOpacity.value = clamp((progress - .025) / .16, 0, .92);
+    this.skyMeadowCloudMaterial.uniforms.uTime.value = this.elapsed;
 
     if (this.skyDoorSpawned) {
       this.skyDoorReveal = clamp(this.skyDoorReveal + delta / 4.2, 0, 1);
@@ -2487,7 +2709,7 @@ class PrivateRoom {
     if (this.skyMeadowTerrainMaterial) this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowGrassMaterial) this.skyMeadowGrassMaterial.uniforms.uOpacity.value = 0;
     if (this.skyMeadowFlowerMaterial) this.skyMeadowFlowerMaterial.uniforms.uOpacity.value = 0;
-    if (this.skyMeadowCloudMaterial) this.skyMeadowCloudMaterial.opacity = 0;
+    if (this.skyMeadowCloudMaterial) this.skyMeadowCloudMaterial.uniforms.uOpacity.value = 0;
     this.skyDoorMaterials?.forEach((material) => {
       material.opacity = 0;
     });
@@ -2498,8 +2720,9 @@ class PrivateRoom {
     this.postMaterial.uniforms.glitch.value = 0;
     document.documentElement.style.setProperty("--glitch-opacity", "0");
     document.documentElement.style.setProperty("--glitch-x", "0px");
+    document.body.classList.add("is-sky-mode");
     const roomScreenEffects = document.querySelector(".screen-effects");
-    if (roomScreenEffects) roomScreenEffects.style.display = "none";
+    if (roomScreenEffects) roomScreenEffects.style.display = "";
     if (this.transitionBlackout) {
       this.transitionBlackout.style.background = "#fff";
       this.transitionBlackout.style.opacity = "1";
@@ -2567,7 +2790,7 @@ class PrivateRoom {
     if (skyAdapted && movingOnSky && !this.skyMeadowStarted) {
       this.skyWalkTime += delta;
     }
-    if (!this.skyMeadowStarted && this.skyWalkTime >= 90) {
+    if (!this.skyMeadowStarted && this.skyWalkTime >= this.skyMeadowStartDelay) {
       this.startSkyMeadowTransition();
     }
 
@@ -5123,6 +5346,7 @@ class PrivateRoom {
 
   enterCityWorld() {
     if (this.cityMode) return;
+    document.body.classList.remove("is-sky-mode");
     this.cityMode = true;
     this.cityLanded = false;
     this.cityLandingTime = 0;
@@ -6054,6 +6278,7 @@ class PrivateRoom {
 
   jumpToLiminalStage(x, z, yaw, entered = true) {
     this.prepareWalkJump();
+    document.body.classList.remove("is-sky-mode");
     this.cityMode = false;
     this.skyMode = false;
     this.scene.visible = true;
@@ -6085,6 +6310,7 @@ class PrivateRoom {
   jumpToCityStage(stageId) {
     this.resetCityFinaleForJump();
     this.prepareWalkJump();
+    document.body.classList.remove("is-sky-mode");
     this.skyMode = false;
     this.cityMode = false;
     this.enterCityWorld();
@@ -6138,6 +6364,7 @@ class PrivateRoom {
 
   jumpToLocationStage(stageId) {
     if (stageId === "start") {
+      document.body.classList.remove("is-sky-mode");
       this.cityMode = false;
       this.skyMode = false;
       this.scene.visible = true;
@@ -6189,7 +6416,7 @@ class PrivateRoom {
       this.skyTransition = this.skyWhiteHold + this.skyTransitionDuration;
       if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
       if (stageId !== "sky") {
-        this.skyWalkTime = 90;
+        this.skyWalkTime = this.skyMeadowStartDelay;
         this.startSkyMeadowTransition();
         this.skyMeadowProgress = stageId === "sky-hills" ? .55 : 1;
         this.updateSkyMeadow(0, false);
@@ -6199,7 +6426,7 @@ class PrivateRoom {
             - this.freeEyeHeight
             - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
           this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
-          this.skyMeadowGroundWalkTime = 105;
+          this.skyMeadowGroundWalkTime = this.skyDoorDelay;
           this.spawnSkyDoor();
           this.freeCameraPosition.x = this.skyDoorRoot.position.x - this.skyMeadowDirection.x * 38;
           this.freeCameraPosition.z = this.skyDoorRoot.position.z - this.skyMeadowDirection.z * 38;

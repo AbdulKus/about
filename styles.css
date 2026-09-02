@@ -225,6 +225,18 @@ body.is-transitioning .transition-blackout {
     linear-gradient(180deg, rgba(4, 0, 1, .38), transparent 19% 76%, rgba(4, 0, 1, .44));
 }
 
+body.is-sky-mode .scanlines,
+body.is-sky-mode .signal-tear,
+body.is-sky-mode .vignette {
+  display: none;
+}
+
+body.is-sky-mode .noise {
+  opacity: .055;
+  filter: contrast(1.12);
+  mix-blend-mode: soft-light;
+}
+
 .room-loader {
   position: fixed;
   z-index: 100;
