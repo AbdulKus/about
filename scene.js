@@ -1895,94 +1895,237 @@ class PrivateRoom {
 
   createEndlessCity() {
     this.cityScene = new THREE.Scene();
-    this.cityScene.background = new THREE.Color(0x03060a);
-    this.cityScene.fog = new THREE.FogExp2(0x05080d, .0125);
-    this.cityScene.add(new THREE.HemisphereLight(0x71809a, 0x050608, .52));
-    const moon = new THREE.DirectionalLight(0x8ca6c9, 1.1);
-    moon.position.set(-28, 54, 17);
+    this.cityScene.background = new THREE.Color(0x02050a);
+    this.cityScene.fog = new THREE.FogExp2(0x040810, .0155);
+    this.cityScene.add(new THREE.HemisphereLight(0x7890ad, 0x020305, .62));
+    const moon = new THREE.DirectionalLight(0x91afd5, 1.28);
+    moon.position.set(-38, 68, 24);
     this.cityScene.add(moon);
 
-    const asphalt = new THREE.MeshStandardMaterial({ color: 0x080b0f, roughness: .94, metalness: .08 });
-    const pavement = new THREE.MeshStandardMaterial({ color: 0x16191d, roughness: .88 });
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), asphalt);
-    road.rotation.x = -Math.PI / 2;
-    road.receiveShadow = true;
-    this.cityScene.add(road);
-
-    const blockSize = 24;
-    const roadWidth = 9;
-    for (let lane = -5; lane <= 5; lane += 1) {
-      const coordinate = lane * 32;
-      const crossA = new THREE.Mesh(new THREE.PlaneGeometry(300, roadWidth), asphalt);
-      crossA.rotation.x = -Math.PI / 2;
-      crossA.position.set(0, .012, coordinate);
-      const crossB = crossA.clone();
-      crossB.rotation.z = Math.PI / 2;
-      crossB.position.set(coordinate, .013, 0);
-      this.cityScene.add(crossA, crossB);
+    const starGeometry = new THREE.BufferGeometry();
+    const starPositions = [];
+    for (let i = 0; i < 420; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 110 + Math.random() * 150;
+      starPositions.push(Math.cos(angle) * radius, 38 + Math.random() * 125, Math.sin(angle) * radius);
     }
+    starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
+    this.cityStars = new THREE.Points(
+      starGeometry,
+      new THREE.PointsMaterial({ color: 0x9fb6d0, size: .24, transparent: true, opacity: .62, depthWrite: false })
+    );
+    this.cityScene.add(this.cityStars);
 
-    const buildingMaterials = [
-      new THREE.MeshStandardMaterial({ color: 0x090d13, roughness: .82, metalness: .18, emissive: 0x020508 }),
-      new THREE.MeshStandardMaterial({ color: 0x101319, roughness: .9, emissive: 0x030405 }),
-      new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .76, metalness: .25, emissive: 0x010305 })
-    ];
-    for (let gx = -4; gx <= 4; gx += 1) {
-      for (let gz = -4; gz <= 4; gz += 1) {
-        const centerX = gx * 32 + 16;
-        const centerZ = gz * 32 + 16;
-        const seed = Math.abs(Math.sin(gx * 91.7 + gz * 47.3));
-        const count = seed > .55 ? 3 : 2;
-        for (let n = 0; n < count; n += 1) {
-          const h = 13 + ((seed * 97 + n * 13.7) % 1) * 43;
-          const w = 7 + ((seed * 31 + n * 5.1) % 1) * 7;
-          const d = 7 + ((seed * 53 + n * 8.3) % 1) * 7;
-          const building = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), buildingMaterials[(n + gx - gz + 30) % 3]);
-          building.position.set(centerX + (n - (count - 1) * .5) * 9, h * .5 + .16, centerZ + Math.sin(seed * 30 + n) * 6);
-          building.castShadow = true;
-          building.receiveShadow = true;
-          this.cityScene.add(building);
-          for (let floor = 3; floor < h - 2; floor += 4.2) {
-            const windows = new THREE.Mesh(
-              new THREE.PlaneGeometry(w * .66, .55),
-              new THREE.MeshBasicMaterial({
-                color: ((floor + n * 7) % 3) < 1 ? 0xc7a669 : 0x30445b,
-                transparent: true,
-                opacity: ((floor * 11 + n) % 5) < 2 ? .52 : .12,
-                toneMapped: false
-              })
-            );
-            windows.position.set(building.position.x, floor, building.position.z + d * .501);
-            this.cityScene.add(windows);
+    const makeFacade = (litColor, darkColor, frequency) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 128;
+      canvas.height = 256;
+      const context = canvas.getContext("2d");
+      context.fillStyle = darkColor;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      for (let y = 8; y < 250; y += 15) {
+        for (let x = 7; x < 124; x += 14) {
+          const lit = Math.abs(Math.sin(x * 2.17 + y * 4.93 + frequency * 11)) > frequency;
+          context.fillStyle = lit ? litColor : "rgba(8,13,20,.92)";
+          context.fillRect(x, y, 7, 7);
+          if (lit) {
+            context.fillStyle = "rgba(255,255,255,.18)";
+            context.fillRect(x, y, 7, 1);
           }
         }
-        const plaza = new THREE.Mesh(new THREE.BoxGeometry(blockSize, .22, blockSize), pavement);
-        plaza.position.set(centerX, .1, centerZ);
-        plaza.receiveShadow = true;
-        this.cityScene.add(plaza);
+      }
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.magFilter = THREE.NearestFilter;
+      return texture;
+    };
+
+    const facadeTextures = [
+      makeFacade("#e8c47d", "#080c13", .56),
+      makeFacade("#8fbad2", "#070b12", .68),
+      makeFacade("#d89175", "#0b0c12", .73),
+      makeFacade("#a9b4cf", "#090c13", .62)
+    ];
+    this.cityBuildingMaterials = facadeTextures.map((texture, index) => new THREE.MeshStandardMaterial({
+      color: [0x17202a, 0x101820, 0x19171c, 0x12161d][index],
+      map: texture,
+      emissiveMap: texture,
+      emissive: new THREE.Color([0x80612b, 0x29485c, 0x67352b, 0x35405a][index]),
+      emissiveIntensity: .72,
+      roughness: .78,
+      metalness: .14
+    }));
+    this.cityRoofMaterial = new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .68, metalness: .42 });
+    this.cityAsphaltMaterial = new THREE.MeshStandardMaterial({
+      color: 0x070b10,
+      roughness: .64,
+      metalness: .3,
+      envMapIntensity: .5
+    });
+    this.cityPavementMaterial = new THREE.MeshStandardMaterial({ color: 0x171b21, roughness: .9 });
+    this.cityMetalMaterial = new THREE.MeshStandardMaterial({ color: 0x111820, roughness: .38, metalness: .82 });
+    this.cityLampMaterial = new THREE.MeshBasicMaterial({ color: 0xffd69a, toneMapped: false });
+
+    this.cityChunkSize = 64;
+    this.cityChunkGrid = 5;
+    this.cityChunks = [];
+    for (let gridZ = -2; gridZ <= 2; gridZ += 1) {
+      for (let gridX = -2; gridX <= 2; gridX += 1) {
+        const chunk = this.createCityChunk(gridX, gridZ);
+        chunk.position.set(gridX * this.cityChunkSize, 0, gridZ * this.cityChunkSize);
+        this.cityScene.add(chunk);
+        this.cityChunks.push(chunk);
       }
     }
+  }
 
-    this.cityLampLights = [];
-    const metal = new THREE.MeshStandardMaterial({ color: 0x11161b, roughness: .45, metalness: .75 });
-    const bulb = new THREE.MeshBasicMaterial({ color: 0xffdca2, toneMapped: false });
-    for (let i = -4; i <= 4; i += 1) {
-      [-4.7, 4.7].forEach((offset, side) => {
-        const lamp = new THREE.Group();
-        lamp.position.set(i * 16, 0, offset);
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(.055, .075, 4.8, 8), metal);
-        pole.position.y = 2.4;
-        const head = new THREE.Mesh(new THREE.SphereGeometry(.18, 10, 8), bulb);
-        head.position.y = 4.68;
-        lamp.add(pole, head);
-        if (i % 2 === 0) {
-          const light = new THREE.PointLight(0xffc977, 12, 15, 1.7);
-          light.position.y = 4.45;
-          lamp.add(light);
-          this.cityLampLights.push(light);
-        }
-        this.cityScene.add(lamp);
-      });
+  createCityChunk(gridX, gridZ) {
+    const chunk = new THREE.Group();
+    const size = this.cityChunkSize;
+    const seed = Math.abs(Math.sin(gridX * 127.13 + gridZ * 311.71)) + .013;
+    const seeded = (salt) => {
+      const value = Math.sin((seed + salt) * 43758.5453);
+      return value - Math.floor(value);
+    };
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(size + .2, size + .2), this.cityAsphaltMaterial);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -.035;
+    ground.receiveShadow = true;
+    chunk.add(ground);
+
+    const sidewalkSize = 25;
+    [[-18.5, -18.5], [18.5, -18.5], [-18.5, 18.5], [18.5, 18.5]].forEach(([x, z], plotIndex) => {
+      const sidewalk = new THREE.Mesh(
+        new THREE.BoxGeometry(sidewalkSize, .24, sidewalkSize),
+        this.cityPavementMaterial
+      );
+      sidewalk.position.set(x, .1, z);
+      sidewalk.receiveShadow = true;
+      chunk.add(sidewalk);
+
+      const style = Math.floor(seeded(plotIndex * 9.1) * 4);
+      const baseHeight = 17 + seeded(plotIndex * 14.7 + 2) * 42;
+      const width = 10 + seeded(plotIndex * 18.2 + 4) * 10;
+      const depth = 10 + seeded(plotIndex * 21.3 + 7) * 10;
+      const material = this.cityBuildingMaterials[(style + plotIndex) % this.cityBuildingMaterials.length];
+      const building = new THREE.Mesh(new THREE.BoxGeometry(width, baseHeight, depth), material);
+      building.position.set(x + (seeded(plotIndex + 30) - .5) * 4, baseHeight * .5 + .24, z + (seeded(plotIndex + 40) - .5) * 4);
+      building.castShadow = true;
+      building.receiveShadow = true;
+      chunk.add(building);
+
+      if (style === 0 || style === 3) {
+        const tierHeight = 6 + seeded(plotIndex + 51) * 15;
+        const tier = new THREE.Mesh(
+          new THREE.BoxGeometry(width * .62, tierHeight, depth * .62),
+          this.cityBuildingMaterials[(style + 1) % 4]
+        );
+        tier.position.set(building.position.x, baseHeight + tierHeight * .5 + .22, building.position.z);
+        tier.castShadow = true;
+        chunk.add(tier);
+      } else if (style === 1) {
+        const tank = new THREE.Mesh(
+          new THREE.CylinderGeometry(2.1, 2.35, 3.1, 12),
+          this.cityRoofMaterial
+        );
+        tank.position.set(building.position.x, baseHeight + 1.8, building.position.z);
+        tank.castShadow = true;
+        chunk.add(tank);
+      }
+
+      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(.035, .055, 4.5 + seeded(plotIndex + 72) * 7, 6), this.cityMetalMaterial);
+      antenna.position.set(building.position.x + width * .22, baseHeight + antenna.geometry.parameters.height * .5, building.position.z);
+      chunk.add(antenna);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(.11, 8, 6), new THREE.MeshBasicMaterial({
+        color: plotIndex % 2 ? 0xff3636 : 0xb8d7ff,
+        toneMapped: false
+      }));
+      beacon.position.set(antenna.position.x, baseHeight + antenna.geometry.parameters.height, antenna.position.z);
+      chunk.add(beacon);
+
+      if (seeded(plotIndex + 89) > .47) {
+        const signColor = [0x59d9ff, 0xff456d, 0xf5bf55, 0x9c7cff][(style + gridX + gridZ + 16) % 4];
+        const sign = new THREE.Mesh(
+          new THREE.PlaneGeometry(Math.min(width * .68, 8), 1.15),
+          new THREE.MeshBasicMaterial({ color: signColor, toneMapped: false, transparent: true, opacity: .82 })
+        );
+        sign.position.set(building.position.x, 4.2 + seeded(plotIndex + 90) * 8, building.position.z + depth * .505);
+        chunk.add(sign);
+      }
+    });
+
+    const markingMaterial = new THREE.MeshBasicMaterial({ color: 0xb9a66d, toneMapped: false });
+    for (let offset = -27; offset <= 27; offset += 8) {
+      const lineX = new THREE.Mesh(new THREE.PlaneGeometry(3.7, .075), markingMaterial);
+      lineX.rotation.x = -Math.PI / 2;
+      lineX.position.set(offset, .012, 0);
+      const lineZ = lineX.clone();
+      lineZ.rotation.z = Math.PI / 2;
+      lineZ.position.set(0, .013, offset);
+      chunk.add(lineX, lineZ);
+    }
+
+    const addLamp = (x, z, lightIndex) => {
+      const lamp = new THREE.Group();
+      lamp.position.set(x, 0, z);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(.055, .078, 4.9, 8), this.cityMetalMaterial);
+      pole.position.y = 2.47;
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(1.1, .075, .075), this.cityMetalMaterial);
+      arm.position.set(x > 0 ? -.48 : .48, 4.82, 0);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(.16, 10, 7), this.cityLampMaterial);
+      bulb.position.set(x > 0 ? -.94 : .94, 4.72, 0);
+      lamp.add(pole, arm, bulb);
+      if ((gridX + gridZ + lightIndex + 20) % 4 === 0) {
+        const light = new THREE.PointLight(0xffc77d, 8.5, 13, 1.8);
+        light.position.copy(bulb.position);
+        lamp.add(light);
+      }
+      chunk.add(lamp);
+    };
+    addLamp(-6.1, -8.2, 0);
+    addLamp(6.1, 8.2, 1);
+    addLamp(-8.2, 6.1, 2);
+    addLamp(8.2, -6.1, 3);
+
+    const carColors = [0x182331, 0x35151a, 0x171a1e, 0x20283a];
+    for (let carIndex = 0; carIndex < 3; carIndex += 1) {
+      const car = new THREE.Group();
+      const horizontal = carIndex % 2 === 0;
+      const lane = carIndex === 2 ? -3.1 : 3.1;
+      const along = -22 + seeded(carIndex + 120) * 44;
+      car.position.set(horizontal ? along : lane, .34, horizontal ? lane : along);
+      if (!horizontal) car.rotation.y = Math.PI / 2;
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(3.1, .55, 1.45),
+        new THREE.MeshStandardMaterial({ color: carColors[(carIndex + gridX - gridZ + 20) % carColors.length], roughness: .42, metalness: .56 })
+      );
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.65, .5, 1.25), this.cityRoofMaterial);
+      cabin.position.set(-.15, .46, 0);
+      const tail = new THREE.Mesh(new THREE.PlaneGeometry(.36, .16), new THREE.MeshBasicMaterial({ color: 0xff2c24, toneMapped: false }));
+      tail.rotation.y = -Math.PI / 2;
+      tail.position.set(1.56, .06, 0);
+      car.add(body, cabin, tail);
+      chunk.add(car);
+    }
+
+    return chunk;
+  }
+
+  updateEndlessCity() {
+    if (!this.cityChunks?.length) return;
+    const span = this.cityChunkSize * this.cityChunkGrid;
+    const halfSpan = span * .5;
+    this.cityChunks.forEach((chunk) => {
+      while (chunk.position.x - this.freeCameraPosition.x > halfSpan) chunk.position.x -= span;
+      while (chunk.position.x - this.freeCameraPosition.x < -halfSpan) chunk.position.x += span;
+      while (chunk.position.z - this.freeCameraPosition.z > halfSpan) chunk.position.z -= span;
+      while (chunk.position.z - this.freeCameraPosition.z < -halfSpan) chunk.position.z += span;
+    });
+    if (this.cityStars) {
+      this.cityStars.position.x = this.freeCameraPosition.x;
+      this.cityStars.position.z = this.freeCameraPosition.z;
     }
   }
 
@@ -2066,10 +2209,7 @@ class PrivateRoom {
     this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 10, delta);
     this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 10, delta);
     this.freeCameraPosition.addScaledVector(this.freeCameraVelocity, delta);
-    if (this.freeCameraPosition.x > 140) this.freeCameraPosition.x -= 256;
-    if (this.freeCameraPosition.x < -140) this.freeCameraPosition.x += 256;
-    if (this.freeCameraPosition.z > 140) this.freeCameraPosition.z -= 256;
-    if (this.freeCameraPosition.z < -140) this.freeCameraPosition.z += 256;
+    this.updateEndlessCity();
     this.camera.position.copy(this.freeCameraPosition);
     this.camera.position.y = 3.6 + Math.sin(this.elapsed * (running ? 9 : 6.5)) * Math.min(.045, desired.length() * .012);
     this.camera.rotation.set(this.freePitch, this.freeYaw, 0);
