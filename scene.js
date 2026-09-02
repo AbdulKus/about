@@ -46,10 +46,12 @@ class PrivateRoom {
     this.liminalEntered = false;
     this.liminalFall = false;
     this.liminalFallTime = 0;
-    this.liminalStairStartX = -142.4;
-    this.liminalStairEndX = -152.55;
-    this.liminalStairRise = 7.45;
-    this.liminalStairSteps = 18;
+    this.liminalStairStartX = -139.5;
+    this.liminalStairEndX = -157.0;
+    this.liminalStairExitX = -160.05;
+    this.liminalStairRise = 9.2;
+    this.liminalStairSteps = 24;
+    this.skyBaseY = 0;
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
     this.skyCloudTime = 0;
@@ -1142,6 +1144,7 @@ class PrivateRoom {
     const centerZ = this.liminalCenterZ;
     const startX = this.liminalStairStartX;
     const endX = this.liminalStairEndX;
+    const exitX = this.liminalStairExitX;
     const stepCount = this.liminalStairSteps;
     const totalRun = startX - endX;
     const stepDepth = totalRun / stepCount;
@@ -1154,23 +1157,28 @@ class PrivateRoom {
 
     const stepMaterial = new THREE.MeshStandardMaterial({
       color: 0x241819,
-      roughness: .58,
-      metalness: .08,
-      emissive: 0x16090b,
-      emissiveIntensity: .34
+      roughness: .62,
+      metalness: .06,
+      emissive: 0x14080a,
+      emissiveIntensity: .26
     });
     const trimMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8a6744,
-      roughness: .34,
-      metalness: .58,
-      emissive: 0x2b1809,
-      emissiveIntensity: .18
+      color: 0x9b754c,
+      roughness: .31,
+      metalness: .62,
+      emissive: 0x29170a,
+      emissiveIntensity: .16
+    });
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0x18090c,
+      roughness: .91,
+      metalness: .02
     });
 
     for (let index = 0; index < stepCount; index += 1) {
       const topY = (index + 1) * stepRise;
       const step = new THREE.Mesh(
-        new THREE.BoxGeometry(stepDepth + .035, topY, 2.62),
+        new THREE.BoxGeometry(stepDepth + .045, topY, 2.72),
         stepMaterial
       );
       step.position.set(startX - stepDepth * (index + .5), topY * .5, centerZ);
@@ -1179,40 +1187,81 @@ class PrivateRoom {
       exit.add(step);
 
       const lip = new THREE.Mesh(
-        new THREE.BoxGeometry(.055, .055, 2.68),
+        new THREE.BoxGeometry(.06, .055, 2.78),
         trimMaterial
       );
-      lip.position.set(startX - stepDepth * (index + 1) + .025, topY + .018, centerZ);
+      lip.position.set(startX - stepDepth * (index + 1) + .03, topY + .02, centerZ);
       exit.add(lip);
     }
 
-    [-1.48, 1.48].forEach((side) => {
-      const rail = new THREE.Mesh(
-        new THREE.CylinderGeometry(.035, .045, totalRun * 1.24, 10),
-        trimMaterial
-      );
-      rail.rotation.z = Math.PI * .455;
-      rail.position.set((startX + endX) * .5, this.liminalStairRise * .5 + 1.02, centerZ + side);
-      exit.add(rail);
+    const landingLength = endX - exitX + .28;
+    const landing = new THREE.Mesh(
+      new THREE.BoxGeometry(landingLength, .18, 2.72),
+      stepMaterial
+    );
+    landing.position.set((endX + exitX) * .5, this.liminalStairRise - .09, centerZ);
+    landing.castShadow = true;
+    landing.receiveShadow = true;
+    exit.add(landing);
 
-      for (let index = 1; index < stepCount; index += 3) {
-        const t = index / stepCount;
-        const post = new THREE.Mesh(
-          new THREE.CylinderGeometry(.028, .035, 1.0, 9),
-          trimMaterial
-        );
-        post.position.set(lerp(startX, endX, t), t * this.liminalStairRise + .52, centerZ + side);
-        exit.add(post);
-      }
+    const stairShellLength = startX - exitX + .6;
+    [-1.58, 1.58].forEach((zOffset) => {
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(stairShellLength, this.liminalStairRise + 4.4, .16),
+        wallMaterial
+      );
+      wall.position.set((startX + exitX) * .5, (this.liminalStairRise + 4.4) * .5, centerZ + zOffset);
+      wall.receiveShadow = true;
+      exit.add(wall);
     });
 
-    const hatchY = this.liminalStairRise + 3.62;
-    const hatchX = endX - .08;
-    const hatchWidth = 3.18;
-    const hatchDepth = 3.05;
+    const makeRail = (a, b, radius = .045) => {
+      const direction = b.clone().sub(a);
+      const length = direction.length();
+      const rail = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius, length, 12),
+        trimMaterial
+      );
+      rail.position.copy(a).add(b).multiplyScalar(.5);
+      rail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+      rail.castShadow = true;
+      exit.add(rail);
+      return rail;
+    };
+
+    [-1.46, 1.46].forEach((side) => {
+      const railStart = new THREE.Vector3(startX + .12, 1.03, centerZ + side);
+      const railEnd = new THREE.Vector3(endX - .08, this.liminalStairRise + 1.03, centerZ + side);
+      makeRail(railStart, railEnd, .048);
+
+      const landingRailEnd = new THREE.Vector3(exitX + .34, this.liminalStairRise + 1.03, centerZ + side);
+      makeRail(railEnd, landingRailEnd, .048);
+
+      for (let index = 1; index < stepCount; index += 3) {
+        const stepX = startX - stepDepth * (index + .5);
+        const topY = (index + 1) * stepRise;
+        makeRail(
+          new THREE.Vector3(stepX, topY + .04, centerZ + side),
+          new THREE.Vector3(stepX, topY + 1.02, centerZ + side),
+          .034
+        );
+      }
+      [endX - .42, exitX + .55].forEach((postX) => {
+        makeRail(
+          new THREE.Vector3(postX, this.liminalStairRise + .04, centerZ + side),
+          new THREE.Vector3(postX, this.liminalStairRise + 1.03, centerZ + side),
+          .034
+        );
+      });
+    });
+
+    const hatchY = this.liminalStairRise + 3.58;
+    const hatchX = endX - 1.55;
+    const hatchWidth = 3.32;
+    const hatchDepth = 3.04;
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: 0x211d19,
-      roughness: .46,
+      roughness: .44,
       metalness: .68,
       emissive: 0x15110b,
       emissiveIntensity: .2
@@ -1223,191 +1272,251 @@ class PrivateRoom {
     exit.add(hatch);
     this.liminalHatchGroup = hatch;
 
-    [[hatchWidth, .16, .18, 0, -hatchDepth * .5],
-     [hatchWidth, .16, .18, 0, hatchDepth * .5],
-     [.18, .16, hatchDepth, -hatchWidth * .5, 0],
-     [.18, .16, hatchDepth, hatchWidth * .5, 0]].forEach(([w, h, d, x, z]) => {
+    [[hatchWidth, .17, .18, 0, -hatchDepth * .5],
+     [hatchWidth, .17, .18, 0, hatchDepth * .5],
+     [.18, .17, hatchDepth, -hatchWidth * .5, 0],
+     [.18, .17, hatchDepth, hatchWidth * .5, 0]].forEach(([w, h, d, x, z]) => {
       const part = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMaterial);
       part.position.set(x, 0, z);
       hatch.add(part);
     });
 
     const skyPortal = new THREE.Mesh(
-      new THREE.PlaneGeometry(hatchWidth - .22, hatchDepth - .22),
-      new THREE.MeshBasicMaterial({ color: 0x9fd4f3, side: THREE.DoubleSide, toneMapped: false })
-    );
-    skyPortal.rotation.x = -Math.PI / 2;
-    skyPortal.position.y = .07;
-    hatch.add(skyPortal);
-
-    const lid = new THREE.Mesh(
-      new THREE.BoxGeometry(hatchWidth - .18, .12, hatchDepth - .2),
-      frameMaterial
-    );
-    lid.position.set(1.6, .9, 0);
-    lid.rotation.z = -1.03;
-    hatch.add(lid);
-
-    const coolGlow = new THREE.PointLight(0xbfe6ff, 27, 18, 1.6);
-    coolGlow.position.set(hatchX + 1.25, hatchY - 2.2, centerZ);
-    exit.add(coolGlow);
-    const warmGlow = new THREE.PointLight(0xffb370, 18, 14, 1.7);
-    warmGlow.position.set(startX - 2.2, 2.45, centerZ - .85);
-    exit.add(warmGlow);
-  }
-
-  getLiminalStairHeight(x, z) {
-    if (!this.liminalEntered || this.skyMode || !this.liminalCenterZ) return 0;
-    if (Math.abs(z - this.liminalCenterZ) > 1.42) return 0;
-    const progress = clamp(
-      (this.liminalStairStartX - x) / (this.liminalStairStartX - this.liminalStairEndX),
-      0,
-      1
-    );
-    const eased = progress * progress * (3 - 2 * progress);
-    return eased * this.liminalStairRise;
-  }
-
-  createCloudWorld() {
-    this.skyScene = new THREE.Scene();
-    this.skyScene.background = new THREE.Color(0x91c8eb);
-    this.skyScene.fog = new THREE.FogExp2(0xc4dfef, .0062);
-
-    const skyDome = new THREE.Mesh(
-      new THREE.SphereGeometry(300, 32, 20),
+      new THREE.PlaneGeometry(hatchWidth - .2, hatchDepth - .2),
       new THREE.ShaderMaterial({
-        side: THREE.BackSide,
+        side: THREE.DoubleSide,
         depthWrite: false,
-        uniforms: {
-          topColor: { value: new THREE.Color(0x70b4e5) },
-          horizonColor: { value: new THREE.Color(0xd9edf7) },
-          bottomColor: { value: new THREE.Color(0x8bbcd8) }
-        },
+        uniforms: { time: { value: 0 } },
         vertexShader: `
-          varying vec3 vDir;
+          varying vec2 vUv;
           void main() {
-            vDir = normalize(position);
+            vUv = uv;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
         fragmentShader: `
-          uniform vec3 topColor;
-          uniform vec3 horizonColor;
-          uniform vec3 bottomColor;
-          varying vec3 vDir;
+          varying vec2 vUv;
+          uniform float time;
           void main() {
-            float h = clamp(vDir.y * .5 + .5, 0.0, 1.0);
-            vec3 low = mix(bottomColor, horizonColor, smoothstep(.12, .5, h));
-            vec3 col = mix(low, topColor, smoothstep(.5, .94, h));
+            float haze = sin(vUv.x * 8.0 + time * .12) * .025 + sin(vUv.y * 11.0 - time * .08) * .018;
+            vec3 low = vec3(.72, .88, .97);
+            vec3 high = vec3(.28, .60, .86);
+            vec3 col = mix(low, high, clamp(vUv.y + haze, 0.0, 1.0));
             gl_FragColor = vec4(col, 1.0);
           }
         `
       })
     );
-    this.skyScene.add(skyDome);
-    this.skyDome = skyDome;
+    skyPortal.rotation.x = -Math.PI / 2;
+    skyPortal.position.y = .075;
+    hatch.add(skyPortal);
+    this.liminalSkyPortal = skyPortal;
 
-    this.skyHemiLight = new THREE.HemisphereLight(0xe8f7ff, 0x7899ad, 2.0);
-    this.skyScene.add(this.skyHemiLight);
-    this.skySunLight = new THREE.DirectionalLight(0xfff4da, 2.15);
-    this.skySunLight.position.set(-18, 28, 12);
-    this.skyScene.add(this.skySunLight);
+    const lid = new THREE.Mesh(
+      new THREE.BoxGeometry(hatchWidth - .16, .12, hatchDepth - .18),
+      frameMaterial
+    );
+    lid.position.set(1.7, .95, 0);
+    lid.rotation.z = -1.06;
+    hatch.add(lid);
 
-    const cloudGeometry = new THREE.IcosahedronGeometry(1, 2);
-    const cloudMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf7fbff,
-      roughness: .97,
-      metalness: 0,
-      transparent: true,
-      opacity: .82,
-      depthWrite: false
+    const coolGlow = new THREE.PointLight(0xc7ebff, 31, 21, 1.55);
+    coolGlow.position.set(hatchX + .35, hatchY - 2.0, centerZ);
+    exit.add(coolGlow);
+    const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
+    warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
+    exit.add(warmGlow);
+  }
+
+  getLiminalStairHeight(x, z) {
+    if (!this.liminalEntered || this.skyMode || !this.liminalCenterZ) return 0;
+    if (Math.abs(z - this.liminalCenterZ) > 1.38) return 0;
+    if (x >= this.liminalStairStartX) return 0;
+    if (x <= this.liminalStairEndX) return this.liminalStairRise;
+
+    const progress = clamp(
+      (this.liminalStairStartX - x) / (this.liminalStairStartX - this.liminalStairEndX),
+      0,
+      1
+    );
+    const stepFloat = progress * this.liminalStairSteps;
+    const whole = Math.floor(stepFloat);
+    const fraction = stepFloat - whole;
+    const climbRaw = clamp((fraction - .52) / .4, 0, 1);
+    const climb = climbRaw * climbRaw * (3 - 2 * climbRaw);
+    const stepRise = this.liminalStairRise / this.liminalStairSteps;
+    return Math.min(this.liminalStairRise, (whole + climb) * stepRise);
+  }
+
+  createCloudWorld() {
+    this.skyScene = new THREE.Scene();
+    this.skyRenderCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.skyCloudTime = 0;
+
+    this.skyCloudMaterial = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uAspect: { value: 1 },
+        uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(this.camera.fov * .5)) },
+        uCameraPos: { value: new THREE.Vector3() },
+        uForward: { value: new THREE.Vector3(0, 0, -1) },
+        uRight: { value: new THREE.Vector3(1, 0, 0) },
+        uUp: { value: new THREE.Vector3(0, 1, 0) }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec2 vUv;
+        uniform float uTime;
+        uniform float uAspect;
+        uniform float uTanHalfFov;
+        uniform vec3 uCameraPos;
+        uniform vec3 uForward;
+        uniform vec3 uRight;
+        uniform vec3 uUp;
+
+        float hash31(vec3 p) {
+          p = fract(p * .1031);
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+
+        float noise3(vec3 p) {
+          vec3 i = floor(p);
+          vec3 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+          float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+          float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+          float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+          float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+          float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+          float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+          float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+          float nx00 = mix(n000, n100, f.x);
+          float nx10 = mix(n010, n110, f.x);
+          float nx01 = mix(n001, n101, f.x);
+          float nx11 = mix(n011, n111, f.x);
+          return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
+        }
+
+        float cloudDensity(vec3 p) {
+          vec3 drift = vec3(uTime * .72, sin(uTime * .035) * 1.7, uTime * .26);
+          vec3 q = p + drift;
+          q.xz += vec2(
+            sin(q.z * .018 + uTime * .055),
+            sin(q.x * .016 - uTime * .043)
+          ) * 5.2;
+
+          float macro = noise3(q * .026);
+          float body = noise3(q * .061 + vec3(9.7, 3.1, -7.2));
+          float fluff = noise3(q * .135 + vec3(-4.1, 11.3, 5.8));
+          float shape = macro * .58 + body * .31 + fluff * .11;
+
+          float relativeY = abs(p.y - uCameraPos.y);
+          float vertical = 1.0 - smoothstep(17.0, 34.0, relativeY);
+          float pockets = smoothstep(.535, .69, shape);
+          return pockets * vertical;
+        }
+
+        vec3 skyColor(vec3 rd, vec3 sunDir) {
+          float h = clamp(rd.y * .5 + .5, 0.0, 1.0);
+          vec3 bottom = vec3(.54, .73, .84);
+          vec3 horizon = vec3(.82, .91, .96);
+          vec3 top = vec3(.28, .57, .82);
+          vec3 col = mix(bottom, horizon, smoothstep(.05, .48, h));
+          col = mix(col, top, smoothstep(.48, .96, h));
+          float sunGlow = pow(max(dot(rd, sunDir), 0.0), 18.0);
+          float sunCore = pow(max(dot(rd, sunDir), 0.0), 520.0);
+          col += vec3(1.0, .78, .5) * sunGlow * .16;
+          col += vec3(1.0, .92, .72) * sunCore * 1.35;
+          return col;
+        }
+
+        void main() {
+          vec2 screen = vUv * 2.0 - 1.0;
+          screen.x *= uAspect;
+          vec3 rd = normalize(
+            uForward
+            + uRight * screen.x * uTanHalfFov
+            + uUp * screen.y * uTanHalfFov
+          );
+          vec3 ro = uCameraPos;
+          vec3 sunDir = normalize(vec3(-.48, .72, .34));
+          vec3 color = skyColor(rd, sunDir);
+          float transmittance = 1.0;
+          float jitter = hash31(vec3(gl_FragCoord.xy, fract(uTime))) * 2.4;
+          float t = 1.4 + jitter;
+
+          for (int i = 0; i < 24; i++) {
+            vec3 pos = ro + rd * t;
+            float density = cloudDensity(pos);
+            if (density > .006) {
+              float edgeLight = 1.0 - smoothstep(.18, .92, density);
+              float sunFacing = pow(max(dot(rd, sunDir), 0.0), 5.0);
+              float powder = 1.0 - exp(-density * 4.2);
+              vec3 shadow = vec3(.48, .57, .64);
+              vec3 white = vec3(1.02, 1.015, .99);
+              float lighting = clamp(.52 + edgeLight * .48 + sunFacing * .18, .0, 1.18);
+              vec3 cloud = mix(shadow, white, lighting);
+              cloud *= .84 + powder * .25;
+
+              float stepLength = mix(3.1, 5.6, clamp(t / 125.0, 0.0, 1.0));
+              float alpha = 1.0 - exp(-density * stepLength * .34);
+              color = mix(color, cloud, alpha * transmittance);
+              transmittance *= 1.0 - alpha;
+              if (transmittance < .035) break;
+            }
+            t += mix(3.1, 5.6, clamp(t / 125.0, 0.0, 1.0));
+            if (t > 145.0) break;
+          }
+
+          float grain = (hash31(vec3(gl_FragCoord.xy, floor(uTime * 11.0))) - .5) * .008;
+          color += grain;
+          gl_FragColor = vec4(clamp(color, 0.0, 1.15), 1.0);
+        }
+      `
     });
 
-    const clusterCount = 52;
-    const puffsPerCluster = 9;
-    const instanceCount = clusterCount * puffsPerCluster;
-    this.skyCloudMesh = new THREE.InstancedMesh(cloudGeometry, cloudMaterial, instanceCount);
-    this.skyCloudMesh.frustumCulled = false;
-    this.skyScene.add(this.skyCloudMesh);
-    this.skyCloudDummy = new THREE.Object3D();
-
-    let puffIndex = 0;
-    for (let clusterIndex = 0; clusterIndex < clusterCount; clusterIndex += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = random(18, 92);
-      const cluster = {
-        x: Math.cos(angle) * radius,
-        z: Math.sin(angle) * radius,
-        baseY: random(-8.5, 9),
-        phase: Math.random() * Math.PI * 2,
-        speedX: random(-.42, .42),
-        speedZ: random(-.34, .34),
-        drift: random(.07, .18),
-        scale: random(1.25, 3.7)
-      };
-      this.skyCloudClusters.push(cluster);
-
-      for (let local = 0; local < puffsPerCluster; local += 1) {
-        const side = local - (puffsPerCluster - 1) * .5;
-        this.skyCloudPuffs.push({
-          cluster: clusterIndex,
-          index: puffIndex,
-          lx: side * random(.72, 1.15) + random(-.55, .55),
-          ly: random(-.8, .8) + Math.cos(local * 1.7) * .35,
-          lz: random(-1.55, 1.55),
-          sx: random(.85, 1.45),
-          sy: random(.62, 1.08),
-          sz: random(.95, 1.7),
-          phase: Math.random() * Math.PI * 2
-        });
-        puffIndex += 1;
-      }
-    }
-    this.updateCloudWorld(0);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.skyCloudMaterial);
+    quad.frustumCulled = false;
+    this.skyScene.add(quad);
+    this.skyCloudQuad = quad;
   }
 
   updateCloudWorld(delta) {
-    if (!this.skyCloudMesh) return;
+    if (!this.skyCloudMaterial) return;
     this.skyCloudTime += delta;
-    const time = this.skyCloudTime;
-    const cameraX = this.freeCameraPosition.x || 0;
-    const cameraZ = this.freeCameraPosition.z || 0;
+    const uniforms = this.skyCloudMaterial.uniforms;
+    uniforms.uTime.value = this.skyCloudTime;
+    uniforms.uAspect.value = this.camera.aspect;
+    uniforms.uTanHalfFov.value = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * .5));
+    uniforms.uCameraPos.value.set(
+      this.freeCameraPosition.x,
+      this.skyBaseY,
+      this.freeCameraPosition.z
+    );
 
-    this.skyCloudClusters.forEach((cluster) => {
-      cluster.x += cluster.speedX * delta;
-      cluster.z += cluster.speedZ * delta;
-      const dx = cluster.x - cameraX;
-      const dz = cluster.z - cameraZ;
-      if (dx > 98) cluster.x -= 196;
-      else if (dx < -98) cluster.x += 196;
-      if (dz > 98) cluster.z -= 196;
-      else if (dz < -98) cluster.z += 196;
-    });
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    uniforms.uForward.value.copy(forward);
+    uniforms.uRight.value.copy(right);
+    uniforms.uUp.value.copy(up);
 
-    this.skyCloudPuffs.forEach((puff) => {
-      const cluster = this.skyCloudClusters[puff.cluster];
-      const breathe = 1 + Math.sin(time * cluster.drift + puff.phase) * .09;
-      const swell = 1 + Math.cos(time * cluster.drift * .73 + puff.phase * 1.3) * .055;
-      const clusterY = cluster.baseY + Math.sin(time * cluster.drift + cluster.phase) * .9;
-      this.skyCloudDummy.position.set(
-        cluster.x + puff.lx * cluster.scale + Math.sin(time * .055 + puff.phase) * .18,
-        clusterY + puff.ly * cluster.scale * .52,
-        cluster.z + puff.lz * cluster.scale * .66
-      );
-      this.skyCloudDummy.scale.set(
-        puff.sx * cluster.scale * breathe,
-        puff.sy * cluster.scale * swell,
-        puff.sz * cluster.scale * breathe
-      );
-      this.skyCloudDummy.rotation.set(
-        Math.sin(puff.phase) * .12,
-        time * .01 + puff.phase,
-        Math.cos(puff.phase) * .1
-      );
-      this.skyCloudDummy.updateMatrix();
-      this.skyCloudMesh.setMatrixAt(puff.index, this.skyCloudDummy.matrix);
-    });
-    this.skyCloudMesh.instanceMatrix.needsUpdate = true;
+    if (this.liminalSkyPortal?.material?.uniforms?.time) {
+      this.liminalSkyPortal.material.uniforms.time.value = this.skyCloudTime;
+    }
   }
 
   enterCloudWorld() {
@@ -1425,25 +1534,33 @@ class PrivateRoom {
     if (roomScreenEffects) roomScreenEffects.style.display = "none";
     if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
     this.doorPrompt?.classList.remove("is-visible");
-    this.freeCameraKeys.clear();
-    this.freeCameraVelocity.set(0, 0, 0);
-    this.resetMobileControls();
-    this.freeCameraPosition.set(0, 0, 0);
-    this.freeYaw = 0;
-    this.freePitch = .03;
+
+    // Preserve heading, held movement and momentum so crossing the hatch does
+    // not feel like a teleport or a control reset.
+    this.skyBaseY = this.camera.position.y;
+    this.freeCameraVelocity.multiplyScalar(.68);
     this.walkAmount = 0;
     this.camera.near = .1;
     this.camera.far = 420;
     this.camera.updateProjectionMatrix();
-    this.camera.position.set(0, 3.65, 0);
+    this.camera.position.set(
+      this.freeCameraPosition.x,
+      this.skyBaseY,
+      this.freeCameraPosition.z
+    );
     this.camera.rotation.order = "YXZ";
     this.camera.rotation.set(this.freePitch, this.freeYaw, 0);
+
+    const skyPixelRatio = Math.min(window.devicePixelRatio || 1, this.isTouch ? .95 : 1.2);
+    this.renderer.setPixelRatio(skyPixelRatio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.updateCloudWorld(0);
   }
 
   updateSkyCamera(delta) {
     if (this.isTouch) {
       this.freeYaw -= this.mobileLookInput.x * 1.72 * delta;
-      this.freePitch = clamp(this.freePitch + this.mobileLookInput.y * 1.34 * delta, -Math.PI * .46, Math.PI * .46);
+      this.freePitch = clamp(this.freePitch + this.mobileLookInput.y * 1.34 * delta, -Math.PI * .47, Math.PI * .47);
     }
     const forward = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw));
     const right = new THREE.Vector3(Math.cos(this.freeYaw), 0, -Math.sin(this.freeYaw));
@@ -1458,22 +1575,22 @@ class PrivateRoom {
       input.addScaledVector(forward, this.mobileMoveInput.y);
       input.addScaledVector(right, this.mobileMoveInput.x);
     }
-    const speed = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight") ? 9.2 : 5.1;
+    const running = this.freeCameraKeys.has("ShiftLeft") || this.freeCameraKeys.has("ShiftRight");
+    const speed = running ? 9.0 : 5.0;
     const inputStrength = keyboardMoving ? 1 : mobileStrength;
     const desired = input.lengthSq() > 0 ? input.normalize().multiplyScalar(speed * inputStrength) : input;
-    this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 5.8, delta);
-    this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 5.8, delta);
+    this.freeCameraVelocity.x = damp(this.freeCameraVelocity.x, desired.x, 5.6, delta);
+    this.freeCameraVelocity.z = damp(this.freeCameraVelocity.z, desired.z, 5.6, delta);
     this.freeCameraPosition.x += this.freeCameraVelocity.x * delta;
     this.freeCameraPosition.z += this.freeCameraVelocity.z * delta;
 
     this.camera.position.set(
       this.freeCameraPosition.x,
-      3.65 + Math.sin(this.skyCloudTime * .32) * .06,
+      this.skyBaseY + Math.sin(this.skyCloudTime * .29) * .045,
       this.freeCameraPosition.z
     );
     this.camera.rotation.order = "YXZ";
     this.camera.rotation.set(this.freePitch, this.freeYaw, 0);
-    if (this.skyDome) this.skyDome.position.copy(this.camera.position);
   }
 
   registerLiminalDistortion(mesh, kind) {
@@ -1564,6 +1681,8 @@ class PrivateRoom {
     const velocityZ = this.freeCameraVelocity.z;
     const time = this.elapsed;
     const seed = this.liminalSeed;
+    const stairApproach = clamp((this.liminalStairStartX + 8.0 - x) / 8.0, 0, 1);
+    const distortionEase = leftEase * (1 - stairApproach);
 
     if (x < -12) {
       const modeA = Math.sin(seed * .017) > 0 ? 1 : -1;
@@ -1572,13 +1691,13 @@ class PrivateRoom {
         const map = this.liminalLeftFloorMaterial.map;
         const autonomous = Math.sin(seed * .003) * .19;
         map.offset.x += delta * (
-          velocityX * .018 * modeA * leftEase
-          + autonomous * leftEase
-          + Math.sin(time * .7 + seed) * .012 * leftEase
+          velocityX * .018 * modeA * distortionEase
+          + autonomous * distortionEase
+          + Math.sin(time * .7 + seed) * .012 * distortionEase
         );
         map.offset.y += delta * (
-          velocityZ * .02 * modeB * leftEase
-          + Math.cos(time * .46 + seed * .3) * .018 * leftEase
+          velocityZ * .02 * modeB * distortionEase
+          + Math.cos(time * .46 + seed * .3) * .018 * distortionEase
         );
       }
 
@@ -1593,7 +1712,8 @@ class PrivateRoom {
           const baseZ = base[i * 3 + 2];
           const worldX = record.mesh.position.x + baseX;
           const depth = clamp((-worldX - 8) / 142, 0, 1);
-          const late = Math.pow(depth, 2.15) * leftEase;
+          const localStability = clamp((worldX - this.liminalStairStartX) / 7.5, 0, 1);
+          const late = Math.pow(depth, 2.15) * distortionEase * localStability;
           const phase = record.phase + meshIndex * 1.31;
           const pulse = Math.sin(time * (1.05 + depth * 2.8) + baseX * .12 + phase);
           const coarse = Math.sin(time * .36 + Math.floor(baseX / 4.8) * 2.4 + phase);
@@ -1622,7 +1742,8 @@ class PrivateRoom {
       });
 
       this.liminalGlitchSlices.forEach((slice, index) => {
-        const local = Math.pow(slice.strength, 1.45) * leftEase;
+        const sliceStability = clamp((slice.baseX - this.liminalStairStartX) / 8.0, 0, 1);
+        const local = Math.pow(slice.strength, 1.45) * distortionEase * sliceStability;
         const lagGate = Math.sin(time * (1.1 + index * .07) + slice.phase);
         const snap = lagGate > .78 ? 1 : 0;
         slice.group.position.x = slice.baseX
@@ -1639,12 +1760,12 @@ class PrivateRoom {
 
       if (this.liminalLeftLight) {
         const badFlicker = Math.sin(time * 13.7 + seed) > .72 ? .25 : 1;
-        const flickerMix = lerp(1, badFlicker, leftEase);
-        this.liminalLeftLight.intensity = (7.5 + Math.sin(time * 1.8 + seed) * 2.1 * leftEase) * (1 - leftEase * .45) * flickerMix;
-        this.liminalLeftLight.position.z = this.liminalCenterZ + Math.sin(time * .51 + seed) * leftEase * 1.4;
+        const flickerMix = lerp(1, badFlicker, distortionEase);
+        this.liminalLeftLight.intensity = (7.5 + Math.sin(time * 1.8 + seed) * 2.1 * distortionEase) * (1 - distortionEase * .45) * flickerMix;
+        this.liminalLeftLight.position.z = this.liminalCenterZ + Math.sin(time * .51 + seed) * distortionEase * 1.4;
       }
 
-      if (leftEase > .01) this.glitch = Math.max(this.glitch, .12 + leftEase * .92);
+      if (distortionEase > .01) this.glitch = Math.max(this.glitch, .12 + distortionEase * .92);
     }
 
     this.liminalStairSanctuary = clamp((this.liminalStairStartX + 2.4 - x) / 6.2, 0, 1);
@@ -2314,8 +2435,8 @@ class PrivateRoom {
 
     if (!this.skyMode
       && this.liminalEntered
-      && this.freeCameraPosition.x <= this.liminalStairEndX + .2
-      && stairHeight >= this.liminalStairRise * .965) {
+      && this.freeCameraPosition.x <= this.liminalStairExitX
+      && stairHeight >= this.liminalStairRise * .995) {
       this.enterCloudWorld();
     }
   }
@@ -2345,7 +2466,7 @@ class PrivateRoom {
       if (Math.abs(x) <= 1.62 && z < centerZ - .15) return false;
     }
     if (this.liminalEntered && z < this.liminalDoorZ + .42) return true;
-    if (x < -153.5 || x > 151.2) return true;
+    if (x < -160.45 || x > 151.2) return true;
 
     let halfWidth = 3.18;
     if (x > 0) {
@@ -2604,7 +2725,7 @@ class PrivateRoom {
     if (this.skyMode) {
       this.renderer.setRenderTarget(null);
       this.renderer.clear();
-      this.renderer.render(this.skyScene, this.camera);
+      this.renderer.render(this.skyScene, this.skyRenderCamera);
       return;
     }
     this.renderer.setRenderTarget(this.renderTarget);
