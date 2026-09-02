@@ -1336,44 +1336,26 @@ class PrivateRoom {
     ceiling.position.set(roomCenterX, floorY + roomHeight, centerZ);
     whiteRoom.add(ceiling);
 
-    // Volumetric glare makes the genuine opening readable from the far corridor.
-    // It has no hard edge, so there is no fake white hatch sheet or frame.
-    const glowCanvas = document.createElement("canvas");
-    glowCanvas.width = glowCanvas.height = 128;
-    const glowContext = glowCanvas.getContext("2d");
-    const glowGradient = glowContext.createRadialGradient(64, 64, 2, 64, 64, 64);
-    glowGradient.addColorStop(0, "rgba(255,255,255,1)");
-    glowGradient.addColorStop(.3, "rgba(255,255,255,.9)");
-    glowGradient.addColorStop(1, "rgba(255,255,255,0)");
-    glowContext.fillStyle = glowGradient;
-    glowContext.fillRect(0, 0, 128, 128);
-    const glowTexture = new THREE.CanvasTexture(glowCanvas);
-    const glowGroup = new THREE.Group();
-    exit.add(glowGroup);
-    [-.28, .04, .34].forEach((offset, index) => {
-      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: glowTexture,
-        color: 0xffffff,
-        transparent: true,
-        opacity: index === 1 ? .96 : .72,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        depthTest: true,
-        toneMapped: false
-      }));
-      glow.position.set(lerp(hatchFarX, hatchNearX, .5 + offset), floorY + 1.15, centerZ);
-      glow.scale.set(7.8, 7.8, 1);
-      glowGroup.add(glow);
+    // One unlit, uniformly white portal. It emits no scene light, so the
+    // ceiling and floor cannot pick up stripes or premature reflections.
+    const portalMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      depthTest: true,
+      depthWrite: true
     });
-    this.liminalStairGlowGroup = glowGroup;
+    const whitePortal = new THREE.Mesh(
+      new THREE.PlaneGeometry(hatchHalfWidth * 2.02, 7.8),
+      portalMaterial
+    );
+    whitePortal.name = "walkThroughWhitePortal";
+    whitePortal.rotation.y = Math.PI / 2;
+    whitePortal.position.set(endX - .22, floorY + 3.72, centerZ);
+    whitePortal.renderOrder = 8;
+    exit.add(whitePortal);
+    this.liminalWhitePortal = whitePortal;
 
-    const hatchGlow = new THREE.PointLight(0xffffff, 238, 78, 1.22);
-    hatchGlow.position.set(hatchCenterX, floorY + 2.2, centerZ);
-    exit.add(hatchGlow);
-    const hatchBeam = new THREE.SpotLight(0xffffff, 310, 96, Math.PI * .34, .78, 1.05);
-    hatchBeam.position.set(hatchCenterX, floorY + 5.8, centerZ);
-    hatchBeam.target.position.set(this.liminalStairStartX + 5, 2.1, centerZ);
-    exit.add(hatchBeam, hatchBeam.target);
     const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
     warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
     exit.add(warmGlow);
@@ -2785,11 +2767,14 @@ class PrivateRoom {
     });
 
     document.addEventListener("pointerlockchange", () => {
-      if (!this.isTouch && this.freeCameraEnabled && document.pointerLockElement !== this.canvas) {
-        this.disableFreeCamera();
-        this.cameraMode = "default";
-        this.boardTransitionTarget = 0;
-        this.updateBoardPresentation(0);
+      if (this.isTouch || !this.freeCameraEnabled) return;
+      if (document.pointerLockElement !== this.canvas) {
+        // Losing focus, changing tabs or leaving fullscreen releases pointer
+        // lock. Keep the current world and camera; the next canvas click
+        // reacquires the cursor instead of restarting the experience.
+        this.freeCameraKeys.clear();
+        this.freeCameraVelocity.set(0, 0, 0);
+        this.walkAmount = 0;
       }
     });
 
@@ -3048,13 +3033,17 @@ class PrivateRoom {
         && this.freeCameraPosition.x <= this.liminalStairEndX + .28
         && stairHeight >= this.liminalStairRise * .985;
       this.liminalWhiteRoom.visible = physicallyInsideRoom;
+      if (this.liminalWhitePortal) {
+        this.liminalWhitePortal.visible = !this.skyMode
+          && this.freeCameraPosition.x > this.liminalStairEndX - .62;
+      }
     }
 
     if (!this.skyMode && this.liminalEntered) {
       const climb = clamp(stairHeight / this.liminalStairRise, 0, 1);
-      const stairGlareProgress = clamp((climb - .62) / .38, 0, 1);
+      const stairGlareProgress = clamp((climb - .84) / .16, 0, 1);
       const stairGlareEase = stairGlareProgress * stairGlareProgress * (3 - 2 * stairGlareProgress);
-      const stairGlare = stairGlareEase * .58;
+      const stairGlare = stairGlareEase * .28;
 
       const roomProgress = clamp(
         (this.liminalStairEndX - this.freeCameraPosition.x)
