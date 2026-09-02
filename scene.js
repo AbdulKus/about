@@ -3466,9 +3466,9 @@ class PrivateRoom {
 
     if (!this.skyMode && this.liminalEntered) {
       const climb = clamp(stairHeight / this.liminalStairRise, 0, 1);
-      const stairGlareProgress = clamp((climb - .84) / .16, 0, 1);
+      const stairGlareProgress = clamp((climb - .12) / .88, 0, 1);
       const stairGlareEase = stairGlareProgress * stairGlareProgress * (3 - 2 * stairGlareProgress);
-      const stairGlare = stairGlareEase * .28;
+      const stairGlare = stairGlareEase * .24;
 
       const roomProgress = clamp(
         (this.liminalStairEndX - this.freeCameraPosition.x)
