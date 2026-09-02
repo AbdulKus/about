@@ -55,7 +55,8 @@ class PrivateRoom {
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
     this.skyTransition = 0;
-    this.skyTransitionDuration = 2.8;
+    this.skyWhiteHold = .85;
+    this.skyTransitionDuration = 3.25;
     this.skyGlare = 0;
     this.skyCloudTime = 0;
     this.shouldRestoreContacts = sessionStorage.getItem("about-return-to-contacts") === "1";
@@ -952,6 +953,8 @@ class PrivateRoom {
 
     for (let index = 0; index < 15; index += 1) {
       const x = -26 - index * 9.2;
+      // The last two ceiling ribs crossed the rising staircase at head height.
+      if (x <= this.liminalStairStartX + .8) continue;
       const rib = new THREE.Group();
       rib.position.set(x, 0, this.liminalCenterZ);
       const mat = new THREE.MeshStandardMaterial({
@@ -1260,11 +1263,74 @@ class PrivateRoom {
       );
     });
 
-    // There is deliberately no hatch geometry here: the final steps run
-    // straight into light, so no slab or frame can cut across the staircase.
-    const coolGlow = new THREE.PointLight(0xffffff, 54, 27, 1.35);
-    coolGlow.position.set(exitX + 2.8, this.liminalStairRise + 3.3, centerZ);
+    // A lidless ceiling hatch marks the exit. Its opening is deliberately
+    // filled with featureless white light; the white space beyond becomes the
+    // exposure bridge into the sky only after the final stair is reached.
+    const hatchY = this.liminalStairRise + 3.56;
+    const hatchWidth = 5.75;
+    const hatchDepth = 3.8;
+    const hatchX = exitX + hatchWidth * .5 - .18;
+    const hatch = new THREE.Group();
+    hatch.position.set(hatchX, hatchY, centerZ);
+    exit.add(hatch);
+    this.liminalHatchGroup = hatch;
+
+    const hatchFrameMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd9d4c8,
+      roughness: .32,
+      metalness: .58,
+      emissive: 0xffffff,
+      emissiveIntensity: .34
+    });
+    [
+      [hatchWidth, .12, .16, 0, -hatchDepth * .5],
+      [hatchWidth, .12, .16, 0, hatchDepth * .5],
+      [.16, .12, hatchDepth, -hatchWidth * .5, 0],
+      [.16, .12, hatchDepth, hatchWidth * .5, 0]
+    ].forEach(([width, height, depth, x, z]) => {
+      const framePart = new THREE.Mesh(
+        new THREE.BoxGeometry(width, height, depth),
+        hatchFrameMaterial
+      );
+      framePart.position.set(x, 0, z);
+      hatch.add(framePart);
+    });
+
+    const whiteOpening = new THREE.Mesh(
+      new THREE.PlaneGeometry(hatchWidth - .28, hatchDepth - .28),
+      new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        toneMapped: false,
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec2 vUv;
+          void main() {
+            vec2 centered = vUv * 2.0 - 1.0;
+            float edge = smoothstep(1.0, .36, max(abs(centered.x), abs(centered.y)));
+            vec3 white = mix(vec3(1.0, .985, .94), vec3(1.0), edge);
+            gl_FragColor = vec4(white, 1.0);
+          }
+        `
+      })
+    );
+    whiteOpening.rotation.x = -Math.PI / 2;
+    whiteOpening.position.y = .025;
+    whiteOpening.renderOrder = 4;
+    hatch.add(whiteOpening);
+
+    const coolGlow = new THREE.PointLight(0xffffff, 118, 36, 1.18);
+    coolGlow.position.set(hatchX, hatchY - 1.45, centerZ);
     exit.add(coolGlow);
+    const upperGlow = new THREE.PointLight(0xfff6df, 74, 28, 1.3);
+    upperGlow.position.set(hatchX + .35, hatchY + 1.8, centerZ);
+    exit.add(upperGlow);
     const warmGlow = new THREE.PointLight(0xffad69, 19, 15, 1.7);
     warmGlow.position.set(startX - 2.8, 2.65, centerZ - .78);
     exit.add(warmGlow);
@@ -1460,12 +1526,14 @@ class PrivateRoom {
     uniforms.uUp.value.copy(up);
 
     if (this.skyMode) {
-      this.skyTransition = clamp(
-        this.skyTransition + delta / this.skyTransitionDuration,
+      const transitionEnd = this.skyWhiteHold + this.skyTransitionDuration;
+      this.skyTransition = Math.min(transitionEnd, this.skyTransition + delta);
+      const adaptationProgress = clamp(
+        (this.skyTransition - this.skyWhiteHold) / this.skyTransitionDuration,
         0,
         1
       );
-      const reveal = this.skyTransition * this.skyTransition * (3 - 2 * this.skyTransition);
+      const reveal = adaptationProgress * adaptationProgress * (3 - 2 * adaptationProgress);
       if (this.transitionBlackout) {
         this.transitionBlackout.style.background = "#fff";
         this.transitionBlackout.style.opacity = (1 - reveal).toFixed(3);
