@@ -2263,7 +2263,7 @@ class PrivateRoom {
     glitchNoise.connect(glitchNoiseFilter);
     glitchNoiseFilter.connect(this.glitchNoiseGain);
     this.glitchNoiseGain.connect(this.audioMaster);
-    glitchNoise.start(random(0, 1.5));
+    glitchNoise.start(0, random(0, 1.5));
 
     const windNoise = context.createBufferSource();
     windNoise.buffer = noiseBuffer;
@@ -2280,7 +2280,7 @@ class PrivateRoom {
     windHighpass.connect(windLowpass);
     windLowpass.connect(this.windGain);
     this.windGain.connect(this.audioMaster);
-    windNoise.start(random(0, 2.5));
+    windNoise.start(0, random(0, 2.5));
 
     const footstepLength = Math.floor(context.sampleRate * .16);
     this.footstepBuffer = context.createBuffer(1, footstepLength, context.sampleRate);
