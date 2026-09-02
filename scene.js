@@ -47,16 +47,17 @@ class PrivateRoom {
     this.liminalFall = false;
     this.liminalFallTime = 0;
     this.liminalStairStartX = -139.5;
-    this.liminalStairEndX = -157.0;
+    this.liminalStairEndX = -160.05;
     this.liminalStairExitX = -160.05;
     this.liminalStairRise = 9.2;
     this.liminalStairSteps = 24;
     this.skyBaseY = 0;
     this.liminalStairSanctuary = 0;
     this.skyMode = false;
+    this.skyTransition = 0;
+    this.skyTransitionDuration = 2.45;
     this.skyCloudTime = 0;
-    this.skyCloudClusters = [];
-    this.skyCloudPuffs = [];
+    this.liminalHatchFadeMaterials = [];
     this.shouldRestoreContacts = sessionStorage.getItem("about-return-to-contacts") === "1";
     this.transitionBlackout = document.querySelector("#transitionBlackout");
     this.glitch = 0;
@@ -1234,37 +1235,43 @@ class PrivateRoom {
       const railEnd = new THREE.Vector3(endX - .08, this.liminalStairRise + 1.03, centerZ + side);
       makeRail(railStart, railEnd, .048);
 
-      const landingRailEnd = new THREE.Vector3(exitX + .34, this.liminalStairRise + 1.03, centerZ + side);
-      makeRail(railEnd, landingRailEnd, .048);
+      const railYAt = (x) => {
+        const progress = clamp((railStart.x - x) / (railStart.x - railEnd.x), 0, 1);
+        return lerp(railStart.y, railEnd.y, progress);
+      };
 
       for (let index = 1; index < stepCount; index += 3) {
         const stepX = startX - stepDepth * (index + .5);
         const topY = (index + 1) * stepRise;
+        const postBottom = topY + .035;
+        const postTop = Math.max(postBottom + .08, railYAt(stepX) - .006);
         makeRail(
-          new THREE.Vector3(stepX, topY + .04, centerZ + side),
-          new THREE.Vector3(stepX, topY + 1.02, centerZ + side),
+          new THREE.Vector3(stepX, postBottom, centerZ + side),
+          new THREE.Vector3(stepX, postTop, centerZ + side),
           .034
         );
       }
-      [endX - .42, exitX + .55].forEach((postX) => {
-        makeRail(
-          new THREE.Vector3(postX, this.liminalStairRise + .04, centerZ + side),
-          new THREE.Vector3(postX, this.liminalStairRise + 1.03, centerZ + side),
-          .034
-        );
-      });
+
+      const finalPostX = endX + .035;
+      makeRail(
+        new THREE.Vector3(finalPostX, this.liminalStairRise + .035, centerZ + side),
+        new THREE.Vector3(finalPostX, railYAt(finalPostX) - .006, centerZ + side),
+        .034
+      );
     });
 
-    const hatchY = this.liminalStairRise + 3.58;
-    const hatchX = endX - 1.55;
-    const hatchWidth = 3.32;
-    const hatchDepth = 3.04;
+    const hatchY = this.liminalStairRise + .13;
+    const hatchWidth = 5.25;
+    const hatchDepth = 4.1;
+    const hatchX = exitX + hatchWidth * .5 - .22;
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: 0x211d19,
       roughness: .44,
       metalness: .68,
       emissive: 0x15110b,
-      emissiveIntensity: .2
+      emissiveIntensity: .2,
+      transparent: true,
+      opacity: 1
     });
 
     const hatch = new THREE.Group();
@@ -1286,7 +1293,11 @@ class PrivateRoom {
       new THREE.ShaderMaterial({
         side: THREE.DoubleSide,
         depthWrite: false,
-        uniforms: { time: { value: 0 } },
+        transparent: true,
+        uniforms: {
+          time: { value: 0 },
+          opacity: { value: 1 }
+        },
         vertexShader: `
           varying vec2 vUv;
           void main() {
@@ -1297,12 +1308,13 @@ class PrivateRoom {
         fragmentShader: `
           varying vec2 vUv;
           uniform float time;
+          uniform float opacity;
           void main() {
             float haze = sin(vUv.x * 8.0 + time * .12) * .025 + sin(vUv.y * 11.0 - time * .08) * .018;
             vec3 low = vec3(.72, .88, .97);
             vec3 high = vec3(.28, .60, .86);
             vec3 col = mix(low, high, clamp(vUv.y + haze, 0.0, 1.0));
-            gl_FragColor = vec4(col, 1.0);
+            gl_FragColor = vec4(col, opacity);
           }
         `
       })
@@ -1316,9 +1328,10 @@ class PrivateRoom {
       new THREE.BoxGeometry(hatchWidth - .16, .12, hatchDepth - .18),
       frameMaterial
     );
-    lid.position.set(1.7, .95, 0);
-    lid.rotation.z = -1.06;
+    lid.position.set(hatchWidth * .47, 1.48, 0);
+    lid.rotation.z = -1.08;
     hatch.add(lid);
+    this.liminalHatchFadeMaterials = [frameMaterial];
 
     const coolGlow = new THREE.PointLight(0xc7ebff, 31, 21, 1.55);
     coolGlow.position.set(hatchX + .35, hatchY - 2.0, centerZ);
@@ -1356,9 +1369,11 @@ class PrivateRoom {
     this.skyCloudMaterial = new THREE.ShaderMaterial({
       depthTest: false,
       depthWrite: false,
+      transparent: true,
       toneMapped: false,
       uniforms: {
         uTime: { value: 0 },
+        uReveal: { value: 0 },
         uAspect: { value: 1 },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(this.camera.fov * .5)) },
         uCameraPos: { value: new THREE.Vector3() },
@@ -1377,6 +1392,7 @@ class PrivateRoom {
         precision highp float;
         varying vec2 vUv;
         uniform float uTime;
+        uniform float uReveal;
         uniform float uAspect;
         uniform float uTanHalfFov;
         uniform vec3 uCameraPos;
@@ -1409,37 +1425,54 @@ class PrivateRoom {
           return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
         }
 
+        float fbm(vec3 p) {
+          float value = 0.0;
+          float amplitude = .54;
+          for (int octave = 0; octave < 4; octave++) {
+            value += noise3(p) * amplitude;
+            p = p * 2.03 + vec3(13.7, 9.2, 17.1);
+            amplitude *= .49;
+          }
+          return value;
+        }
+
         float cloudDensity(vec3 p) {
-          vec3 drift = vec3(uTime * .72, sin(uTime * .035) * 1.7, uTime * .26);
+          vec3 drift = vec3(uTime * 1.65, sin(uTime * .075) * 2.1, uTime * .62);
           vec3 q = p + drift;
           q.xz += vec2(
-            sin(q.z * .018 + uTime * .055),
-            sin(q.x * .016 - uTime * .043)
-          ) * 5.2;
+            sin(q.z * .017 + uTime * .065),
+            sin(q.x * .014 - uTime * .052)
+          ) * 7.0;
 
-          float macro = noise3(q * .026);
-          float body = noise3(q * .061 + vec3(9.7, 3.1, -7.2));
-          float fluff = noise3(q * .135 + vec3(-4.1, 11.3, 5.8));
-          float shape = macro * .58 + body * .31 + fluff * .11;
+          float macro = fbm(q * .017);
+          float body = fbm(q * .043 + vec3(7.4, -3.8, 12.1));
+          float fluff = noise3(q * .115 + vec3(-11.2, 5.6, 3.7));
+          float shape = macro * .57 + body * .35 + fluff * .08;
 
-          float relativeY = abs(p.y - uCameraPos.y);
-          float vertical = 1.0 - smoothstep(17.0, 34.0, relativeY);
-          float pockets = smoothstep(.535, .69, shape);
-          return pockets * vertical;
+          float relativeY = p.y - uCameraPos.y;
+          float lowerFade = smoothstep(-39.0, -17.0, relativeY);
+          float upperFade = 1.0 - smoothstep(22.0, 47.0, relativeY);
+          float billows = smoothstep(.515, .675, shape);
+          float rolling = .88 + .12 * sin(p.x * .018 + p.z * .014 + uTime * .11);
+          return billows * lowerFade * upperFade * rolling * 1.42;
         }
 
         vec3 skyColor(vec3 rd, vec3 sunDir) {
           float h = clamp(rd.y * .5 + .5, 0.0, 1.0);
-          vec3 bottom = vec3(.54, .73, .84);
-          vec3 horizon = vec3(.82, .91, .96);
-          vec3 top = vec3(.28, .57, .82);
-          vec3 col = mix(bottom, horizon, smoothstep(.05, .48, h));
-          col = mix(col, top, smoothstep(.48, .96, h));
-          float sunGlow = pow(max(dot(rd, sunDir), 0.0), 18.0);
-          float sunCore = pow(max(dot(rd, sunDir), 0.0), 520.0);
-          col += vec3(1.0, .78, .5) * sunGlow * .16;
-          col += vec3(1.0, .92, .72) * sunCore * 1.35;
-          return col;
+          vec3 horizon = vec3(.78, .90, .98);
+          vec3 zenith = vec3(.22, .52, .82);
+          vec3 below = vec3(.53, .73, .88);
+          vec3 color = mix(below, horizon, smoothstep(.02, .43, h));
+          color = mix(color, zenith, smoothstep(.43, 1.0, h));
+
+          float towardSun = max(dot(rd, sunDir), 0.0);
+          float broadGlow = pow(towardSun, 7.0);
+          float halo = pow(towardSun, 38.0);
+          float disc = smoothstep(.99915, .99978, towardSun);
+          color += vec3(1.0, .79, .52) * broadGlow * .16;
+          color += vec3(1.0, .91, .68) * halo * .36;
+          color += vec3(1.0, .965, .84) * disc * 1.25;
+          return color;
         }
 
         void main() {
@@ -1451,38 +1484,54 @@ class PrivateRoom {
             + uUp * screen.y * uTanHalfFov
           );
           vec3 ro = uCameraPos;
-          vec3 sunDir = normalize(vec3(-.48, .72, .34));
+          vec3 sunDir = normalize(vec3(-.18, .93, .31));
+          vec3 sunColor = vec3(1.0, .88, .68);
           vec3 color = skyColor(rd, sunDir);
+          vec3 scattering = vec3(0.0);
           float transmittance = 1.0;
-          float jitter = hash31(vec3(gl_FragCoord.xy, fract(uTime))) * 2.4;
-          float t = 1.4 + jitter;
+          float staticJitter = hash31(vec3(gl_FragCoord.xy, 17.0)) * 2.35;
+          float t = 1.0 + staticJitter;
 
-          for (int i = 0; i < 24; i++) {
+          for (int i = 0; i < 38; i++) {
             vec3 pos = ro + rd * t;
             float density = cloudDensity(pos);
-            if (density > .006) {
-              float edgeLight = 1.0 - smoothstep(.18, .92, density);
-              float sunFacing = pow(max(dot(rd, sunDir), 0.0), 5.0);
-              float powder = 1.0 - exp(-density * 4.2);
-              vec3 shadow = vec3(.48, .57, .64);
-              vec3 white = vec3(1.02, 1.015, .99);
-              float lighting = clamp(.52 + edgeLight * .48 + sunFacing * .18, .0, 1.18);
-              vec3 cloud = mix(shadow, white, lighting);
-              cloud *= .84 + powder * .25;
+            if (density > .004) {
+              float towardSunDensity = cloudDensity(pos + sunDir * 5.5);
+              float deeperSunDensity = cloudDensity(pos + sunDir * 13.0);
+              float sunlight = exp(-towardSunDensity * 1.35 - deeperSunDensity * .78);
+              float edge = 1.0 - smoothstep(.12, .93, density);
+              float forwardScatter = pow(max(dot(rd, sunDir), 0.0), 7.0);
 
-              float stepLength = mix(3.1, 5.6, clamp(t / 125.0, 0.0, 1.0));
-              float alpha = 1.0 - exp(-density * stepLength * .34);
-              color = mix(color, cloud, alpha * transmittance);
+              vec3 shadow = vec3(.42, .53, .66);
+              vec3 halfLight = vec3(.76, .82, .88);
+              vec3 warmWhite = vec3(1.07, 1.035, .96);
+              float softLight = clamp(.22 + sunlight * .62 + edge * .34, 0.0, 1.0);
+              vec3 cloud = mix(shadow, halfLight, clamp(density * .82 + .18, 0.0, 1.0));
+              cloud = mix(cloud, warmWhite, softLight);
+
+              float pearlPhase = .5 + .5 * sin(
+                pos.x * .027 + pos.y * .041 + pos.z * .021 + uTime * .16
+              );
+              vec3 pearl = mix(vec3(.89, .97, 1.06), vec3(1.06, .91, 1.0), pearlPhase);
+              cloud *= mix(vec3(1.0), pearl, edge * .13);
+              cloud += sunColor * forwardScatter * sunlight * .18;
+
+              float stepLength = mix(2.45, 4.85, clamp(t / 165.0, 0.0, 1.0));
+              float alpha = 1.0 - exp(-density * stepLength * .43);
+              scattering += cloud * alpha * transmittance;
               transmittance *= 1.0 - alpha;
-              if (transmittance < .035) break;
+              if (transmittance < .018) break;
             }
-            t += mix(3.1, 5.6, clamp(t / 125.0, 0.0, 1.0));
-            if (t > 145.0) break;
+            t += mix(2.45, 4.85, clamp(t / 165.0, 0.0, 1.0));
+            if (t > 178.0) break;
           }
 
-          float grain = (hash31(vec3(gl_FragCoord.xy, floor(uTime * 11.0))) - .5) * .008;
-          color += grain;
-          gl_FragColor = vec4(clamp(color, 0.0, 1.15), 1.0);
+          color = color * transmittance + scattering;
+          float sunThroughClouds = pow(max(dot(rd, sunDir), 0.0), 11.0);
+          color += sunColor * sunThroughClouds * transmittance * .22;
+          float fineGrain = (hash31(vec3(gl_FragCoord.xy, 31.0)) - .5) * .0035;
+          color += fineGrain;
+          gl_FragColor = vec4(clamp(color, 0.0, 1.18), uReveal);
         }
       `
     });
@@ -1500,11 +1549,7 @@ class PrivateRoom {
     uniforms.uTime.value = this.skyCloudTime;
     uniforms.uAspect.value = this.camera.aspect;
     uniforms.uTanHalfFov.value = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * .5));
-    uniforms.uCameraPos.value.set(
-      this.freeCameraPosition.x,
-      this.skyBaseY,
-      this.freeCameraPosition.z
-    );
+    uniforms.uCameraPos.value.copy(this.camera.position);
 
     const forward = new THREE.Vector3();
     this.camera.getWorldDirection(forward);
@@ -1514,6 +1559,31 @@ class PrivateRoom {
     uniforms.uRight.value.copy(right);
     uniforms.uUp.value.copy(up);
 
+    if (this.skyMode) {
+      this.skyTransition = clamp(
+        this.skyTransition + delta / this.skyTransitionDuration,
+        0,
+        1
+      );
+      const reveal = this.skyTransition * this.skyTransition * (3 - 2 * this.skyTransition);
+      uniforms.uReveal.value = reveal;
+
+      const hatchFadeProgress = clamp((this.skyTransition - .04) / .78, 0, 1);
+      const hatchOpacity = 1 - hatchFadeProgress * hatchFadeProgress * (3 - 2 * hatchFadeProgress);
+      this.liminalHatchFadeMaterials.forEach((material) => {
+        material.opacity = hatchOpacity;
+      });
+      if (this.liminalSkyPortal?.material?.uniforms?.opacity) {
+        this.liminalSkyPortal.material.uniforms.opacity.value = hatchOpacity;
+      }
+
+      if (this.skyTransition >= 1) {
+        if (this.liminalHatchGroup) this.liminalHatchGroup.visible = false;
+        this.scene.visible = false;
+        this.renderer.shadowMap.enabled = false;
+      }
+    }
+
     if (this.liminalSkyPortal?.material?.uniforms?.time) {
       this.liminalSkyPortal.material.uniforms.time.value = this.skyCloudTime;
     }
@@ -1522,9 +1592,16 @@ class PrivateRoom {
   enterCloudWorld() {
     if (this.skyMode) return;
     this.skyMode = true;
-    if (this.liminalHatchGroup) this.liminalHatchGroup.visible = false;
-    this.scene.visible = false;
-    this.renderer.shadowMap.enabled = false;
+    this.skyTransition = 0;
+    this.scene.visible = true;
+    if (this.liminalHatchGroup) this.liminalHatchGroup.visible = true;
+    this.liminalHatchFadeMaterials.forEach((material) => {
+      material.opacity = 1;
+    });
+    if (this.liminalSkyPortal?.material?.uniforms?.opacity) {
+      this.liminalSkyPortal.material.uniforms.opacity.value = 1;
+    }
+    this.skyCloudMaterial.uniforms.uReveal.value = 0;
     this.glitch = 0;
     this.nextGlitch = Number.POSITIVE_INFINITY;
     this.postMaterial.uniforms.glitch.value = 0;
@@ -1535,25 +1612,13 @@ class PrivateRoom {
     if (this.transitionBlackout) this.transitionBlackout.style.opacity = "0";
     this.doorPrompt?.classList.remove("is-visible");
 
-    // Preserve heading, held movement and momentum so crossing the hatch does
-    // not feel like a teleport or a control reset.
+    // Keep the exact camera pose, held controls and momentum at the threshold.
+    // The old corridor is dissolved underneath the sky instead of swapping in
+    // a new camera position, so the last stair is crossed continuously.
     this.skyBaseY = this.camera.position.y;
-    this.freeCameraVelocity.multiplyScalar(.68);
-    this.walkAmount = 0;
     this.camera.near = .1;
     this.camera.far = 420;
     this.camera.updateProjectionMatrix();
-    this.camera.position.set(
-      this.freeCameraPosition.x,
-      this.skyBaseY,
-      this.freeCameraPosition.z
-    );
-    this.camera.rotation.order = "YXZ";
-    this.camera.rotation.set(this.freePitch, this.freeYaw, 0);
-
-    const skyPixelRatio = Math.min(window.devicePixelRatio || 1, this.isTouch ? .95 : 1.2);
-    this.renderer.setPixelRatio(skyPixelRatio);
-    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.updateCloudWorld(0);
   }
 
@@ -2723,9 +2788,19 @@ class PrivateRoom {
 
   renderFrame() {
     if (this.skyMode) {
-      this.renderer.setRenderTarget(null);
-      this.renderer.clear();
-      this.renderer.render(this.skyScene, this.skyRenderCamera);
+      if (this.skyTransition < 1 && this.scene.visible) {
+        this.renderer.setRenderTarget(this.renderTarget);
+        this.renderer.clear();
+        this.renderer.render(this.scene, this.camera);
+        this.renderer.setRenderTarget(null);
+        this.renderer.clear();
+        this.renderer.render(this.postScene, this.postCamera);
+        this.renderer.render(this.skyScene, this.skyRenderCamera);
+      } else {
+        this.renderer.setRenderTarget(null);
+        this.renderer.clear();
+        this.renderer.render(this.skyScene, this.skyRenderCamera);
+      }
       return;
     }
     this.renderer.setRenderTarget(this.renderTarget);
