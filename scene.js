@@ -1640,7 +1640,7 @@ class PrivateRoom {
             float cloudOpacity = 1.0 - transmittance;
             if (cloudOpacity < .006) discard;
             vec3 foregroundCloud = scattering / max(cloudOpacity, .001);
-            gl_FragColor = vec4(clamp(foregroundCloud, 0.0, 1.12), cloudOpacity * .56);
+            gl_FragColor = vec4(clamp(foregroundCloud, 0.0, 1.12), cloudOpacity * .76);
             return;
           }
 
@@ -1742,12 +1742,20 @@ class PrivateRoom {
           float broad = meadowFbm(vWorldXZ * .018);
           float fine = meadowNoise(vWorldXZ * .087 + vec2(19.2, -8.4));
           float moss = smoothstep(.34, .77, meadowFbm(vWorldXZ * .034 - 31.0));
+          float turf = meadowFbm(vWorldXZ * .115 + vec2(-17.0, 29.0));
+          float micro = meadowNoise(vWorldXZ * .43 + vec2(turf * 5.1, -turf * 3.7));
+          float grain = meadowNoise(vWorldXZ * 1.08 + vec2(41.0, -12.0));
           vec3 deepGreen = vec3(.075, .245, .055);
           vec3 freshGreen = vec3(.245, .49, .105);
           vec3 sunGreen = vec3(.42, .61, .16);
           vec3 albedo = mix(deepGreen, freshGreen, broad);
           albedo = mix(albedo, sunGreen, moss * .34);
-          albedo *= .88 + fine * .24;
+          albedo *= .82 + fine * .18 + turf * .14 + micro * .09;
+          vec3 warmSoil = vec3(.19, .205, .075);
+          float soil = smoothstep(.78, .94, meadowFbm(vWorldXZ * .061 + vec2(73.0, -46.0)));
+          soil *= .28 + (1.0 - moss) * .34;
+          albedo = mix(albedo, warmSoil, soil * .2);
+          albedo += (grain - .5) * vec3(.035, .05, .012);
           vec3 sunDirection = normalize(vec3(-.42, .83, .36));
           float sunlight = max(dot(normalize(vWorldNormal), sunDirection), 0.0);
           float soft = .58 + sunlight * .42;
@@ -1803,19 +1811,24 @@ class PrivateRoom {
         bladeIndices.push(row, row + 2, row + 1, row + 2, row + 3, row + 1);
       }
     };
+    addBlade(1.42, -.04, .04, .96, .086, .18, 1.02);
     addBlade(0, -.34, .04, .92, .082, .17, .92);
     addBlade(Math.PI * .5, .31, -.08, .84, .078, -.14, 1.08);
     addBlade(-.72, -.08, -.34, .76, .074, .12, .82);
     addBlade(.78, .12, .34, .7, .072, -.1, 1.14);
     addBlade(2.18, -.38, -.24, .64, .068, .08, .76);
     addBlade(-2.3, .39, .2, .72, .07, -.1, .88);
-    addBlade(1.42, -.04, .04, .96, .086, .18, 1.02);
     addBlade(-1.46, .35, -.35, .58, .064, .07, .8);
     addBlade(2.82, -.3, .36, .66, .068, -.09, 1.12);
     grassBaseGeometry.setIndex(bladeIndices);
     grassBaseGeometry.setAttribute("position", new THREE.Float32BufferAttribute(bladePositions, 3));
     grassBaseGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(bladeUvs, 2));
     grassBaseGeometry.setAttribute("aBladeTone", new THREE.Float32BufferAttribute(bladeTones, 1));
+    grassBaseGeometry.setDrawRange(0, bladeIndices.length);
+    const mediumGrassBaseGeometry = grassBaseGeometry.clone();
+    mediumGrassBaseGeometry.setDrawRange(0, 18 * 3);
+    const farGrassBaseGeometry = grassBaseGeometry.clone();
+    farGrassBaseGeometry.setDrawRange(0, 18);
 
     const grassMaterial = new THREE.ShaderMaterial({
       uniforms: {
@@ -1829,6 +1842,7 @@ class PrivateRoom {
         attribute float aPhase;
         attribute float aTint;
         attribute float aBladeTone;
+        attribute float aLod;
         uniform float uTime;
         varying float vHeight;
         varying float vTint;
@@ -1856,8 +1870,10 @@ class PrivateRoom {
           vHeight = uv.y;
           vTint = aTint;
           vBladeTone = aBladeTone;
-          vFog = smoothstep(108.0, 158.0, distanceToCamera);
-          vDistanceFade = 1.0 - smoothstep(126.0, 158.0, distanceToCamera);
+          vFog = smoothstep(158.0, 395.0, distanceToCamera);
+          vDistanceFade = aLod < 1.5
+            ? 1.0
+            : 1.0 - smoothstep(338.0, 412.0, distanceToCamera);
         }
       `,
       fragmentShader: `
@@ -1885,17 +1901,19 @@ class PrivateRoom {
       side: THREE.DoubleSide
     });
 
-    const createGrassGeometry = (count, variant) => {
+    const createGrassGeometry = (count, variant, baseGeometry, lod) => {
       const geometry = new THREE.InstancedBufferGeometry();
-      geometry.setIndex(grassBaseGeometry.index);
-      Object.entries(grassBaseGeometry.attributes).forEach(([name, attribute]) => {
+      geometry.setIndex(baseGeometry.index);
+      Object.entries(baseGeometry.attributes).forEach(([name, attribute]) => {
         geometry.setAttribute(name, attribute);
       });
+      geometry.setDrawRange(baseGeometry.drawRange.start, baseGeometry.drawRange.count);
       const offsets = new Float32Array(count * 2);
       const scales = new Float32Array(count);
       const rotations = new Float32Array(count);
       const phases = new Float32Array(count);
       const tints = new Float32Array(count);
+      const lods = new Float32Array(count);
       let seed = 1709 + variant * 7919;
       const seeded = () => {
         seed = seed * 16807 % 2147483647;
@@ -1912,14 +1930,16 @@ class PrivateRoom {
         rotations[index] = seeded() * Math.PI * 2;
         phases[index] = seeded() * Math.PI * 2;
         tints[index] = .78 + seeded() * .42;
+        lods[index] = lod;
       }
       geometry.setAttribute("aOffset", new THREE.InstancedBufferAttribute(offsets, 2));
       geometry.setAttribute("aScale", new THREE.InstancedBufferAttribute(scales, 1));
       geometry.setAttribute("aRotation", new THREE.InstancedBufferAttribute(rotations, 1));
       geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
       geometry.setAttribute("aTint", new THREE.InstancedBufferAttribute(tints, 1));
+      geometry.setAttribute("aLod", new THREE.InstancedBufferAttribute(lods, 1));
       geometry.instanceCount = count;
-      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * .76);
+      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * 1.05);
       return geometry;
     };
 
@@ -2081,7 +2101,7 @@ class PrivateRoom {
       geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
       geometry.setAttribute("aColor", new THREE.InstancedBufferAttribute(colors, 3));
       geometry.instanceCount = count;
-      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * .76);
+      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * 1.05);
       return geometry;
     };
 
@@ -2089,18 +2109,27 @@ class PrivateRoom {
     this.skyMeadowFlowerMaterial = flowerMaterial;
     this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
 
-    const grassCount = this.isTouch ? 3000 : 7600;
+    const nearGrassCount = this.isTouch ? 3000 : 7600;
+    const mediumGrassCount = this.isTouch ? 1700 : 4100;
+    const farGrassCount = this.isTouch ? 900 : 2300;
     const flowerCount = this.isTouch ? 140 : 340;
-    const grassGeometries = Array.from({ length: 3 }, (_, index) => createGrassGeometry(grassCount, index));
+    this.skyMeadowGrassGeometrySets = [
+      Array.from({ length: 3 }, (_, index) => createGrassGeometry(nearGrassCount, index, grassBaseGeometry, 0)),
+      Array.from({ length: 3 }, (_, index) => createGrassGeometry(mediumGrassCount, index + 11, mediumGrassBaseGeometry, 1)),
+      Array.from({ length: 3 }, (_, index) => createGrassGeometry(farGrassCount, index + 23, farGrassBaseGeometry, 2))
+    ];
     const flowerGeometries = Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCount, index));
+    this.skyMeadowTileRadius = 3;
     this.skyMeadowTiles = [];
-    for (let tile = 0; tile < 9; tile += 1) {
-      const grass = new THREE.Mesh(grassGeometries[tile % grassGeometries.length], grassMaterial);
+    const meadowTileCount = (this.skyMeadowTileRadius * 2 + 1) ** 2;
+    for (let tile = 0; tile < meadowTileCount; tile += 1) {
+      const grass = new THREE.Mesh(this.skyMeadowGrassGeometrySets[2][tile % 3], grassMaterial);
       const flowers = new THREE.Mesh(flowerGeometries[(tile * 2) % flowerGeometries.length], flowerMaterial);
+      flowers.visible = false;
       grass.renderOrder = 2;
       flowers.renderOrder = 3;
       this.skyMeadowRoot.add(grass, flowers);
-      this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null });
+      this.skyMeadowTiles.push({ grass, flowers, tileX: null, tileZ: null, lod: 2 });
     }
 
     const woodCanvas = document.createElement("canvas");
@@ -2362,7 +2391,7 @@ class PrivateRoom {
     wingTexture.minFilter = THREE.LinearMipmapLinearFilter;
     wingTexture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
 
-    const butterflyCount = this.isTouch ? 2 : 3;
+    const butterflyCount = this.isTouch ? 12 : 20;
     const butterflyPalette = [0xffcf38, 0x4fb8ff, 0xf06bb4, 0xf8eee0, 0x8d72e8, 0xff714f, 0x58d6a7];
     const addWingColors = (geometry, lower) => {
       const colors = new Float32Array(butterflyCount * 3);
@@ -2460,7 +2489,7 @@ class PrivateRoom {
       radius: 3.5 + Math.random() * 9.5,
       height: 1.4 + Math.random() * 6.8,
       speed: .18 + Math.random() * .32,
-      scale: .94 + Math.random() * .48
+      scale: .38 + Math.random() * .19
     }));
     this.skyButterflyMaterials = [wingMaterial, bodyMaterial];
     this.skyButterflyDummy = new THREE.Object3D();
@@ -2479,6 +2508,12 @@ class PrivateRoom {
         material.stencilFail = THREE.KeepStencilOp;
         material.stencilZFail = THREE.KeepStencilOp;
         material.stencilZPass = THREE.ReplaceStencilOp;
+      });
+    });
+    this.skyDoorRoot.traverse((object) => {
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.filter(Boolean).forEach((material) => {
+        material.stencilRef = 2;
       });
     });
   }
@@ -2505,19 +2540,22 @@ class PrivateRoom {
   updateSkyMeadowTiles() {
     if (!this.skyMeadowTiles?.length) return;
     const tileSize = this.skyMeadowTileSize;
-    const centerX = Math.floor(this.freeCameraPosition.x / tileSize);
-    const centerZ = Math.floor(this.freeCameraPosition.z / tileSize);
+    const centerX = Math.round(this.freeCameraPosition.x / tileSize);
+    const centerZ = Math.round(this.freeCameraPosition.z / tileSize);
     if (centerX === this.skyMeadowTileCenterX && centerZ === this.skyMeadowTileCenterZ) return;
     this.skyMeadowTileCenterX = centerX;
     this.skyMeadowTileCenterZ = centerZ;
     const desired = [];
     const desiredKeys = new Set();
-    for (let offsetZ = -1; offsetZ <= 1; offsetZ += 1) {
-      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+    const radius = this.skyMeadowTileRadius ?? 3;
+    for (let offsetZ = -radius; offsetZ <= radius; offsetZ += 1) {
+      for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
         const tileX = centerX + offsetX;
         const tileZ = centerZ + offsetZ;
         const key = tileX + ":" + tileZ;
-        desired.push({ tileX, tileZ, key });
+        const ring = Math.max(Math.abs(offsetX), Math.abs(offsetZ));
+        const lod = ring <= 1 ? 0 : ring === 2 ? 1 : 2;
+        desired.push({ tileX, tileZ, key, lod });
         desiredKeys.add(key);
       }
     }
@@ -2529,13 +2567,20 @@ class PrivateRoom {
       else free.push(record);
     });
     desired.forEach((target) => {
-      if (existing.has(target.key)) return;
-      const record = free.shift();
+      const record = existing.get(target.key) || free.shift();
       if (!record) return;
-      record.tileX = target.tileX;
-      record.tileZ = target.tileZ;
-      record.grass.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
-      record.flowers.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
+      const variant = Math.abs((target.tileX * 73856093) ^ (target.tileZ * 19349663)) % 3;
+      if (record.tileX !== target.tileX || record.tileZ !== target.tileZ) {
+        record.tileX = target.tileX;
+        record.tileZ = target.tileZ;
+        record.grass.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
+        record.flowers.position.set(target.tileX * tileSize, 0, target.tileZ * tileSize);
+      }
+      if (record.lod !== target.lod || record.grass.geometry !== this.skyMeadowGrassGeometrySets[target.lod][variant]) {
+        record.lod = target.lod;
+        record.grass.geometry = this.skyMeadowGrassGeometrySets[target.lod][variant];
+      }
+      record.flowers.visible = target.lod === 0;
     });
   }
 
