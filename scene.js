@@ -2039,19 +2039,78 @@ class PrivateRoom {
     };
     const roadTexture = makeSurfaceTexture("road");
     const pavementTexture = makeSurfaceTexture("pavement");
+    const maxAnisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    roadTexture.anisotropy = maxAnisotropy;
+    pavementTexture.anisotropy = maxAnisotropy;
+
+    const makeReliefTexture = (kind) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 256;
+      const context = canvas.getContext("2d");
+      context.fillStyle = kind === "road" ? "#777" : "#999";
+      context.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 2400; i += 1) {
+        const base = kind === "road" ? 92 : 126;
+        const value = Math.floor(base + (Math.random() - .5) * (kind === "road" ? 72 : 42));
+        context.fillStyle = `rgb(${value},${value},${value})`;
+        const size = Math.random() < .88 ? 1 : 2 + Math.random() * 3;
+        context.fillRect(Math.random() * 256, Math.random() * 256, size, size);
+      }
+      context.strokeStyle = kind === "road" ? "rgba(22,22,22,.88)" : "rgba(50,50,50,.64)";
+      context.lineWidth = kind === "road" ? 2 : 1;
+      const lines = kind === "road" ? 15 : 18;
+      for (let line = 0; line < lines; line += 1) {
+        context.beginPath();
+        let x = Math.random() * 256;
+        let y = Math.random() * 256;
+        context.moveTo(x, y);
+        for (let point = 0; point < 7; point += 1) {
+          x += (Math.random() - .5) * 19;
+          y += 5 + Math.random() * 15;
+          context.lineTo(x, y);
+        }
+        context.stroke();
+      }
+      if (kind === "pavement") {
+        context.strokeStyle = "rgba(48,48,48,.75)";
+        context.lineWidth = 2;
+        for (let tile = 0; tile <= 256; tile += 32) {
+          context.beginPath();
+          context.moveTo(tile, 0);
+          context.lineTo(tile, 256);
+          context.moveTo(0, tile);
+          context.lineTo(256, tile);
+          context.stroke();
+        }
+      }
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.NoColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.copy(kind === "road" ? roadTexture.repeat : pavementTexture.repeat);
+      texture.anisotropy = maxAnisotropy;
+      return texture;
+    };
+    const roadReliefTexture = makeReliefTexture("road");
+    const pavementReliefTexture = makeReliefTexture("pavement");
 
     this.cityRoofMaterial = new THREE.MeshStandardMaterial({ color: 0x080b10, roughness: .68, metalness: .42 });
     this.cityAsphaltMaterial = new THREE.MeshStandardMaterial({
       color: 0x151a20,
       map: roadTexture,
-      roughness: .7,
+      bumpMap: roadReliefTexture,
+      bumpScale: .19,
+      roughnessMap: roadReliefTexture,
+      roughness: .78,
       metalness: .28,
       envMapIntensity: .5
     });
     this.cityPavementMaterial = new THREE.MeshStandardMaterial({
       color: 0x262b30,
       map: pavementTexture,
-      roughness: .9
+      bumpMap: pavementReliefTexture,
+      bumpScale: .085,
+      roughnessMap: pavementReliefTexture,
+      roughness: .92
     });
     this.cityMetalMaterial = new THREE.MeshStandardMaterial({ color: 0x111820, roughness: .38, metalness: .82 });
     this.cityConcreteDetailMaterial = new THREE.MeshStandardMaterial({ color: 0x30363b, roughness: .88 });
@@ -2223,6 +2282,77 @@ class PrivateRoom {
         );
         detailGroup.add(vent);
       }
+
+      const drainPipe = new THREE.Mesh(
+        new THREE.CylinderGeometry(.075, .075, Math.min(baseHeight - 1.5, 18), 7),
+        this.cityMetalMaterial
+      );
+      drainPipe.position.set(
+        building.position.x - width * .43,
+        Math.min(baseHeight * .5, 9.5),
+        building.position.z + depth * .514
+      );
+      detailGroup.add(drainPipe);
+
+      const ledgeCount = 2 + Math.floor(seeded(plotIndex + 160) * 3);
+      for (let ledgeIndex = 0; ledgeIndex < ledgeCount; ledgeIndex += 1) {
+        const ledge = new THREE.Mesh(
+          new THREE.BoxGeometry(width * .96, .09, .22),
+          this.cityConcreteDetailMaterial
+        );
+        ledge.position.set(
+          building.position.x,
+          5.2 + ledgeIndex * 4.6,
+          building.position.z + depth * .515
+        );
+        detailGroup.add(ledge);
+      }
+
+      if (style === 2 || seeded(plotIndex + 171) > .72) {
+        for (let escapeIndex = 0; escapeIndex < 3; escapeIndex += 1) {
+          const escapeY = 6.2 + escapeIndex * 4.5;
+          if (escapeY > baseHeight - 1.5) break;
+          const platform = new THREE.Mesh(
+            new THREE.BoxGeometry(2.8, .08, .72),
+            this.cityMetalMaterial
+          );
+          platform.position.set(building.position.x + width * .22, escapeY, building.position.z + depth * .55);
+          detailGroup.add(platform);
+          for (let barIndex = -2; barIndex <= 2; barIndex += 1) {
+            const bar = new THREE.Mesh(
+              new THREE.CylinderGeometry(.022, .022, .72, 5),
+              this.cityMetalMaterial
+            );
+            bar.position.set(platform.position.x + barIndex * .55, escapeY + .36, platform.position.z + .3);
+            detailGroup.add(bar);
+          }
+          if (escapeIndex < 2) {
+            const ladder = new THREE.Mesh(
+              new THREE.BoxGeometry(.055, 4.35, .055),
+              this.cityMetalMaterial
+            );
+            ladder.position.set(platform.position.x + 1.1, escapeY + 2.2, platform.position.z + .31);
+            detailGroup.add(ladder);
+          }
+        }
+      }
+
+      const serviceDoor = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.15, 2.05),
+        this.cityMetalMaterial
+      );
+      serviceDoor.position.set(
+        building.position.x - width * .28,
+        1.32,
+        building.position.z + depth * .523
+      );
+      detailGroup.add(serviceDoor);
+      const doorLamp = new THREE.Mesh(
+        new THREE.BoxGeometry(.24, .13, .1),
+        this.cityLampMaterial
+      );
+      doorLamp.position.set(serviceDoor.position.x, 2.55, serviceDoor.position.z + .08);
+      detailGroup.add(doorLamp);
     });
 
     const drainMaterial = new THREE.MeshStandardMaterial({ color: 0x090c0f, roughness: .54, metalness: .76 });
@@ -2280,6 +2410,63 @@ class PrivateRoom {
       crosswalk.position.set(stripe * .9, .019, 6.1);
       detailGroup.add(crosswalk);
     }
+
+    const patchMaterial = new THREE.MeshStandardMaterial({
+      color: 0x11151a,
+      roughness: .96,
+      bumpMap: roadReliefTexture,
+      bumpScale: .24
+    });
+    for (let patchIndex = 0; patchIndex < 3; patchIndex += 1) {
+      const patch = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.4 + seeded(270 + patchIndex) * 3.2, 1.2 + seeded(280 + patchIndex) * 1.8),
+        patchMaterial
+      );
+      patch.rotation.x = -Math.PI / 2;
+      patch.rotation.z = seeded(290 + patchIndex) * .8;
+      patch.position.set(
+        -23 + seeded(300 + patchIndex) * 46,
+        .021,
+        patchIndex % 2 ? 2.25 : -2.25
+      );
+      detailGroup.add(patch);
+    }
+
+    const bench = new THREE.Group();
+    const benchSeat = new THREE.Mesh(new THREE.BoxGeometry(2.25, .12, .56), this.cityRoofMaterial);
+    benchSeat.position.y = .62;
+    const benchBack = new THREE.Mesh(new THREE.BoxGeometry(2.25, .78, .1), this.cityRoofMaterial);
+    benchBack.position.set(0, .94, .27);
+    const benchLegA = new THREE.Mesh(new THREE.BoxGeometry(.12, .62, .42), this.cityMetalMaterial);
+    benchLegA.position.set(-.78, .31, 0);
+    const benchLegB = benchLegA.clone();
+    benchLegB.position.x = .78;
+    bench.add(benchSeat, benchBack, benchLegA, benchLegB);
+    bench.position.set(10.4, 0, -6.8);
+    bench.rotation.y = Math.PI * .5;
+    detailGroup.add(bench);
+
+    const newsBox = new THREE.Mesh(
+      new THREE.BoxGeometry(.72, 1.05, .58),
+      new THREE.MeshStandardMaterial({ color: 0x273747, roughness: .55, metalness: .42 })
+    );
+    newsBox.position.set(7.25, .65, -11.2);
+    detailGroup.add(newsBox);
+
+    const trafficLight = new THREE.Group();
+    const signalPole = new THREE.Mesh(new THREE.CylinderGeometry(.065, .085, 4.2, 8), this.cityMetalMaterial);
+    signalPole.position.y = 2.1;
+    const signalBox = new THREE.Mesh(new THREE.BoxGeometry(.48, 1.28, .42), this.cityMetalMaterial);
+    signalBox.position.set(0, 3.65, 0);
+    const signalRed = new THREE.Mesh(new THREE.SphereGeometry(.105, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3327, toneMapped: false }));
+    signalRed.position.set(0, 3.98, .23);
+    const signalAmber = new THREE.Mesh(new THREE.SphereGeometry(.105, 8, 6), new THREE.MeshBasicMaterial({ color: 0x573d12, toneMapped: false }));
+    signalAmber.position.set(0, 3.65, .23);
+    const signalGreen = new THREE.Mesh(new THREE.SphereGeometry(.105, 8, 6), new THREE.MeshBasicMaterial({ color: 0x163522, toneMapped: false }));
+    signalGreen.position.set(0, 3.32, .23);
+    trafficLight.add(signalPole, signalBox, signalRed, signalAmber, signalGreen);
+    trafficLight.position.set(6.25, 0, 6.25);
+    detailGroup.add(trafficLight);
 
     const markingMaterial = new THREE.MeshBasicMaterial({ color: 0xb9a66d, toneMapped: false });
     for (let offset = -27; offset <= 27; offset += 8) {
@@ -2409,11 +2596,12 @@ class PrivateRoom {
     this.freeCameraPosition.set(0, 3.6, 14);
     this.freeCameraVelocity.set(0, 0, 0);
     this.glitch = 0;
+    this.nextGlitch = this.elapsed + random(2.4, 5.2);
     this.postMaterial.uniforms.glitch.value = 0;
     document.documentElement.style.setProperty("--glitch-opacity", "0");
     document.documentElement.style.setProperty("--glitch-x", "0px");
     const roomScreenEffects = document.querySelector(".screen-effects");
-    if (roomScreenEffects) roomScreenEffects.style.display = "none";
+    if (roomScreenEffects) roomScreenEffects.style.display = "";
     if (this.transitionBlackout) {
       this.transitionBlackout.style.background = "#000";
       this.transitionBlackout.style.opacity = "1";
@@ -3749,8 +3937,23 @@ class PrivateRoom {
 
   updateEffects(delta) {
     if (this.cityMode) {
-      this.glitch = 0;
-      this.postMaterial.uniforms.glitch.value = 0;
+      const cityTheme = this.themeDefinitions[this.activeTheme];
+      if (!this.reduceMotion && this.elapsed > this.nextGlitch) {
+        this.glitch = this.activeTheme === "fever" ? 1 : random(.42, .78);
+        this.nextGlitch = this.elapsed + random(3.3, 7.2);
+      }
+      this.glitch = Math.max(
+        cityTheme.glitch,
+        this.glitch - delta * (this.activeTheme === "fever" ? 1.45 : 2.9)
+      );
+      this.postMaterial.uniforms.glitch.value = this.glitch;
+      this.postMaterial.uniforms.time.value = this.elapsed;
+      const cssGlitch = this.glitch > .38 ? (this.glitch - .38) / .62 : 0;
+      document.documentElement.style.setProperty("--glitch-opacity", (cssGlitch * .7).toFixed(3));
+      document.documentElement.style.setProperty(
+        "--glitch-x",
+        `${((Math.random() - .5) * cssGlitch * 34).toFixed(1)}px`
+      );
       return;
     }
     if (this.skyMode) {
@@ -3796,9 +3999,12 @@ class PrivateRoom {
 
   renderFrame() {
     if (this.cityMode) {
-      this.renderer.setRenderTarget(null);
+      this.renderer.setRenderTarget(this.renderTarget);
       this.renderer.clear();
       this.renderer.render(this.cityScene, this.camera);
+      this.renderer.setRenderTarget(null);
+      this.renderer.clear();
+      this.renderer.render(this.postScene, this.postCamera);
       return;
     }
     if (this.skyMode) {
