@@ -5,7 +5,9 @@ export const SKY_MEADOW_TIMING = Object.freeze({
 });
 
 export const SKY_MEADOW_SETTINGS = Object.freeze({
-  contactDepth: 38,
+  // Start beyond the terrain fog instead of toggling an infinite plane into
+  // view only a few metres below the camera.
+  contactDepth: 360,
   tileSize: 64,
   terrainSize: 720
 });

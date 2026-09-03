@@ -5,7 +5,7 @@ import {
   SKY_MEADOW_TIMING,
   SKY_NOISE_GLSL,
   sampleSkyMeadowHeight
-} from "./sky-meadow.js?v=5";
+} from "./sky-meadow.js?v=6";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, amount) => a + (b - a) * amount;
@@ -126,7 +126,9 @@ class PrivateRoom {
     this.skyMeadowTileSize = SKY_MEADOW_SETTINGS.tileSize;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
+    this.skyDoorGuidesPlaced = false;
     this.skyDoorLandscape = new THREE.Vector3(0, 0, 0);
+    this.skyMeadowOrigin = new THREE.Vector3();
     this.skyMeadowTileCenterX = Number.NaN;
     this.skyMeadowTileCenterZ = Number.NaN;
     this.skySpawnPosition = new THREE.Vector3();
@@ -1682,7 +1684,7 @@ class PrivateRoom {
           float layer = smoothstep(-42.0, -18.0, relativeY)
             * (1.0 - smoothstep(23.0, 49.0, relativeY));
           float spawnClearance = smoothstep(18.0, 38.0, length(p - uSpawnPos));
-          return smoothstep(.515, .665, shape) * layer * spawnClearance * 1.36;
+          return smoothstep(.528, .675, shape) * layer * spawnClearance * 1.32;
         }
 
         vec3 skyColor(vec3 rd, vec3 sunDir) {
@@ -2212,6 +2214,36 @@ class PrivateRoom {
     flowerBaseGeometry.setAttribute("aFlowerPart", new THREE.Float32BufferAttribute(flowerParts, 1));
     flowerBaseGeometry.setAttribute("aFlowerTone", new THREE.Float32BufferAttribute(flowerTones, 1));
 
+    const createSimpleFlowerBase = (ultraSimple = false) => {
+      const geometry = new THREE.BufferGeometry();
+      const positions = [];
+      const parts = [];
+      const tones = [];
+      const indices = [];
+      const addQuad = (vertices, part, tone) => {
+        const first = positions.length / 3;
+        vertices.forEach(([x, y, z]) => {
+          positions.push(x, y, z);
+          parts.push(part);
+          tones.push(tone);
+        });
+        indices.push(first, first + 2, first + 1, first + 2, first + 3, first + 1);
+      };
+      if (!ultraSimple) {
+        addQuad([[-.022, 0, 0], [.022, 0, 0], [-.018, .86, 0], [.018, .86, 0]], 0, .96);
+        addQuad([[0, 0, -.022], [0, 0, .022], [0, .86, -.018], [0, .86, .018]], 0, 1.04);
+      }
+      addQuad([[-.26, .82, 0], [0, .72, 0], [.26, .82, 0], [0, 1.05, 0]], 1, 1);
+      addQuad([[0, .82, -.26], [0, .72, 0], [0, .82, .26], [0, 1.05, 0]], 1, .92);
+      geometry.setIndex(indices);
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("aFlowerPart", new THREE.Float32BufferAttribute(parts, 1));
+      geometry.setAttribute("aFlowerTone", new THREE.Float32BufferAttribute(tones, 1));
+      return geometry;
+    };
+    const simpleFlowerBaseGeometry = createSimpleFlowerBase(false);
+    const ultraFlowerBaseGeometry = createSimpleFlowerBase(true);
+
     const flowerMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uOpacity: { value: 0 },
@@ -2270,7 +2302,7 @@ class PrivateRoom {
           vColor = aColor;
           vPart = aFlowerPart;
           vTone = aFlowerTone;
-          vFog = smoothstep(92.0, 145.0, distanceToCamera);
+          vFog = smoothstep(185.0, 385.0, distanceToCamera);
         }
       `,
       fragmentShader: `
@@ -2295,10 +2327,10 @@ class PrivateRoom {
       side: THREE.DoubleSide
     });
 
-    const createFlowerGeometry = (count, variant) => {
+    const createFlowerGeometry = (count, variant, baseGeometry = flowerBaseGeometry, scaleMultiplier = 1) => {
       const geometry = new THREE.InstancedBufferGeometry();
-      geometry.setIndex(flowerBaseGeometry.index);
-      Object.entries(flowerBaseGeometry.attributes).forEach(([name, attribute]) => {
+      geometry.setIndex(baseGeometry.index);
+      Object.entries(baseGeometry.attributes).forEach(([name, attribute]) => {
         geometry.setAttribute(name, attribute);
       });
       const offsets = new Float32Array(count * 2);
@@ -2315,7 +2347,7 @@ class PrivateRoom {
       for (let index = 0; index < count; index += 1) {
         offsets[index * 2] = (seeded() - .5) * this.skyMeadowTileSize;
         offsets[index * 2 + 1] = (seeded() - .5) * this.skyMeadowTileSize;
-        scales[index] = .78 + seeded() * .72;
+        scales[index] = (.78 + seeded() * .72) * scaleMultiplier;
         rotations[index] = seeded() * Math.PI * 2;
         phases[index] = seeded() * Math.PI * 2;
         const color = new THREE.Color(palette[Math.floor(seeded() * palette.length)]);
@@ -2329,6 +2361,7 @@ class PrivateRoom {
       geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phases, 1));
       geometry.setAttribute("aColor", new THREE.InstancedBufferAttribute(colors, 3));
       geometry.instanceCount = count;
+      geometry.userData.maxInstanceCount = count;
       geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), this.skyMeadowTileSize * 1.05);
       return geometry;
     };
@@ -2337,27 +2370,37 @@ class PrivateRoom {
     this.skyMeadowFlowerMaterial = flowerMaterial;
     this.skyMeadowMaterials.push(grassMaterial, flowerMaterial);
 
-    const nearGrassCount = this.isTouch ? 1600 : 2900;
-    const mediumGrassCount = this.isTouch ? 2200 : 3800;
-    const farGrassCount = this.isTouch ? 3000 : 5200;
-    const ultraGrassCount = this.isTouch ? 2200 : 3600;
-    const flowerCount = this.isTouch ? 56 : 140;
+    const nearGrassCount = this.isTouch ? 1950 : 2900;
+    const mediumGrassCount = this.isTouch ? 2700 : 3800;
+    const farGrassCount = this.isTouch ? 3550 : 5200;
+    const ultraGrassCount = this.isTouch ? 2650 : 3600;
     this.skyMeadowGrassGeometrySets = [
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(nearGrassCount, index, grassBaseGeometry, 0)),
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(mediumGrassCount, index + 11, mediumGrassBaseGeometry, 1)),
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(farGrassCount, index + 23, farGrassBaseGeometry, 2)),
       Array.from({ length: 3 }, (_, index) => createGrassGeometry(ultraGrassCount, index + 37, ultraGrassBaseGeometry, 3))
     ];
-    const flowerGeometries = Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCount, index));
-    this.skyMeadowFlowerGeometries = flowerGeometries;
-    this.skyMeadowFlowerCount = flowerCount;
+    const flowerCounts = this.isTouch ? [62, 82, 66, 42] : [140, 150, 112, 74];
+    this.skyMeadowFlowerGeometrySets = [
+      Array.from({ length: 3 }, (_, index) => createFlowerGeometry(flowerCounts[0], index)),
+      Array.from({ length: 3 }, (_, index) => createFlowerGeometry(
+        flowerCounts[1], index + 11, simpleFlowerBaseGeometry, .94
+      )),
+      Array.from({ length: 3 }, (_, index) => createFlowerGeometry(
+        flowerCounts[2], index + 23, simpleFlowerBaseGeometry, .88
+      )),
+      Array.from({ length: 3 }, (_, index) => createFlowerGeometry(
+        flowerCounts[3], index + 37, ultraFlowerBaseGeometry, .82
+      ))
+    ];
+    this.skyMeadowFlowerGeometries = this.skyMeadowFlowerGeometrySets.flat();
     this.skyMeadowTileRadius = 5;
     this.skyMeadowTiles = [];
     const meadowTileCount = (this.skyMeadowTileRadius * 2 + 1) ** 2;
     for (let tile = 0; tile < meadowTileCount; tile += 1) {
       const grass = new THREE.Mesh(this.skyMeadowGrassGeometrySets[3][tile % 3], grassMaterial);
-      const flowers = new THREE.Mesh(flowerGeometries[(tile * 2) % flowerGeometries.length], flowerMaterial);
-      flowers.visible = false;
+      const flowers = new THREE.Mesh(this.skyMeadowFlowerGeometrySets[3][tile % 3], flowerMaterial);
+      flowers.visible = true;
       grass.renderOrder = 2;
       flowers.renderOrder = 3;
       this.skyMeadowRoot.add(grass, flowers);
@@ -2686,7 +2729,8 @@ class PrivateRoom {
     wingTexture.minFilter = THREE.LinearMipmapLinearFilter;
     wingTexture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
 
-    const butterflyCount = this.isTouch ? 12 : 20;
+    const butterflyCount = this.isTouch ? 14 : 22;
+    const guideButterflyCount = this.isTouch ? 4 : 6;
     const butterflyPalette = [0xffcf38, 0x4fb8ff, 0xf06bb4, 0xf8eee0, 0x8d72e8, 0xff714f, 0x58d6a7];
     const addWingColors = (geometry, lower) => {
       const colors = new Float32Array(butterflyCount * 3);
@@ -2779,12 +2823,21 @@ class PrivateRoom {
     this.skyButterflyGroup.add(this.skyButterflyBody);
     this.skyButterflyGroup.add(this.skyButterflyHead);
     this.skyMeadowRoot.add(this.skyButterflyGroup);
+    this.skyGuideButterflyCount = guideButterflyCount;
     this.skyButterflies = Array.from({ length: butterflyCount }, (_, index) => ({
+      role: index < guideButterflyCount ? "guide" : "orbit",
+      state: index < guideButterflyCount ? "perched" : "orbit",
       phase: index * 2.399 + Math.random() * .7,
       radius: 3.5 + Math.random() * 9.5,
       height: 1.4 + Math.random() * 6.8,
       speed: .18 + Math.random() * .32,
-      scale: .38 + Math.random() * .19
+      scale: .38 + Math.random() * .19,
+      perch: new THREE.Vector3(),
+      flightStartPosition: new THREE.Vector3(),
+      lastPosition: new THREE.Vector3(),
+      flightStart: 0,
+      flightDuration: 1,
+      guideArc: index % 2 ? 1 : -1
     }));
     this.skyButterflyMaterials = [wingMaterial, bodyMaterial];
     this.skyButterflyDummy = new THREE.Object3D();
@@ -2821,6 +2874,7 @@ class PrivateRoom {
     this.skyMeadowGroundWalkTime = 0;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
+    this.skyDoorGuidesPlaced = false;
     this.skyDoorLandscape.set(0, 0, 0);
     this.skyMeadowRoot.visible = true;
     if (this.skyDoorRoot) this.skyDoorRoot.visible = false;
@@ -2830,6 +2884,8 @@ class PrivateRoom {
     this.skyMeadowBaseY = this.skyBaseY
       - this.freeEyeHeight
       - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
+    this.skyMeadowRoot.position.y = this.skyMeadowBaseY - this.skyMeadowContactDepth;
+    this.skyMeadowOrigin.copy(this.freeCameraPosition);
     this.skyMeadowTileCenterX = Number.NaN;
     this.skyMeadowTileCenterZ = Number.NaN;
   }
@@ -2877,7 +2933,9 @@ class PrivateRoom {
         record.lod = target.lod;
         record.grass.geometry = this.skyMeadowGrassGeometrySets[target.lod][variant];
       }
-      record.flowers.visible = target.lod === 0;
+      const flowerGeometry = this.skyMeadowFlowerGeometrySets[target.lod][variant];
+      if (record.flowers.geometry !== flowerGeometry) record.flowers.geometry = flowerGeometry;
+      record.flowers.visible = true;
     });
   }
 
@@ -2934,18 +2992,89 @@ class PrivateRoom {
     this.skyMushroomGroup.visible = true;
   }
 
-  spawnSkyDoor() {
-    if (this.skyDoorSpawned || !this.skyDoorRoot || !this.skyMeadowGrounded) return;
+  positionSkyGuideButterflies(startX, startZ, doorX, doorZ) {
+    const deltaX = doorX - startX;
+    const deltaZ = doorZ - startZ;
+    const distance = Math.max(1, Math.hypot(deltaX, deltaZ));
+    const directionX = deltaX / distance;
+    const directionZ = deltaZ / distance;
+    const perpendicularX = -directionZ;
+    const perpendicularZ = directionX;
+    let guideIndex = 0;
+    this.skyButterflies.forEach((record) => {
+      if (record.role !== "guide") return;
+      const fraction = .74
+        + (guideIndex + 1) / (this.skyGuideButterflyCount + 1) * .22
+        + Math.sin(record.phase) * .018;
+      const wander = Math.sin(record.phase * 2.1 + 1.3) * (3.2 + guideIndex % 2 * 2.1);
+      const idealX = startX + deltaX * fraction + perpendicularX * wander;
+      const idealZ = startZ + deltaZ * fraction + perpendicularZ * wander;
+      const tileX = Math.round(idealX / this.skyMeadowTileSize);
+      const tileZ = Math.round(idealZ / this.skyMeadowTileSize);
+      const variant = Math.abs((tileX * 73856093) ^ (tileZ * 19349663)) % 3;
+      const flowerGeometry = this.skyMeadowFlowerGeometrySets[0][variant];
+      const offsets = flowerGeometry.getAttribute("aOffset");
+      const scales = flowerGeometry.getAttribute("aScale");
+      const localTargetX = idealX - tileX * this.skyMeadowTileSize;
+      const localTargetZ = idealZ - tileZ * this.skyMeadowTileSize;
+      let nearestIndex = 0;
+      let nearestDistanceSq = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < offsets.count; index += 1) {
+        const dx = offsets.getX(index) - localTargetX;
+        const dz = offsets.getY(index) - localTargetZ;
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq < nearestDistanceSq) {
+          nearestDistanceSq = distanceSq;
+          nearestIndex = index;
+        }
+      }
+      const x = tileX * this.skyMeadowTileSize + offsets.getX(nearestIndex);
+      const z = tileZ * this.skyMeadowTileSize + offsets.getY(nearestIndex);
+      const flowerHeight = .97 * scales.getX(nearestIndex);
+      record.perch.set(x, this.skyMeadowHeightWorld(x, z) + flowerHeight, z);
+      record.lastPosition.copy(record.perch);
+      record.state = "perched";
+      record.flightStart = 0;
+      guideIndex += 1;
+    });
+  }
+
+  activateSkyDoorGuides() {
+    if (this.skyDoorGuidesPlaced || !this.skyDoorSpawned) return;
+    this.skyDoorGuidesPlaced = true;
+    this.placeSkyMushroomTrail(
+      this.skyMeadowOrigin.x,
+      this.skyMeadowOrigin.z,
+      this.skyDoorRoot.position.x,
+      this.skyDoorRoot.position.z
+    );
+  }
+
+  spawnSkyDoor(placeGuides = false) {
+    if (!this.skyDoorRoot) return;
+    if (this.skyDoorSpawned) {
+      if (placeGuides) this.activateSkyDoorGuides();
+      return;
+    }
     this.skyDoorSpawned = true;
     this.skyDoorReveal = 0;
-    const facing = new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
-    const trailStartX = this.freeCameraPosition.x;
-    const trailStartZ = this.freeCameraPosition.z;
+    const velocityDirection = new THREE.Vector3(
+      this.freeCameraVelocity.x,
+      0,
+      this.freeCameraVelocity.z
+    );
+    const facing = velocityDirection.lengthSq() > .2
+      ? velocityDirection.normalize()
+      : new THREE.Vector3(-Math.sin(this.freeYaw), 0, -Math.cos(this.freeYaw)).normalize();
+    const trailStartX = this.skyMeadowOrigin.x;
+    const trailStartZ = this.skyMeadowOrigin.z;
     const viewerHeight = this.skyMeadowHeightWorld(trailStartX, trailStartZ) + this.freeEyeHeight;
     let placement = null;
 
-    for (let directionIndex = -8; directionIndex <= 8; directionIndex += 1) {
-      const offset = directionIndex * .15;
+    // Keep the destination almost straight ahead. The small search cone only
+    // chooses the nicest natural silhouette instead of sending the player off course.
+    for (let directionIndex = -2; directionIndex <= 2; directionIndex += 1) {
+      const offset = directionIndex * .07;
       const cosine = Math.cos(offset);
       const sine = Math.sin(offset);
       const direction = new THREE.Vector3(
@@ -2953,9 +3082,9 @@ class PrivateRoom {
         0,
         -facing.x * sine + facing.z * cosine
       ).normalize();
-      let crestDistance = 90;
+      let crestDistance = 150;
       let crestHeight = Number.NEGATIVE_INFINITY;
-      for (let distance = 95; distance <= 205; distance += 5) {
+      for (let distance = 145; distance <= 230; distance += 5) {
         const x = trailStartX + direction.x * distance;
         const z = trailStartZ + direction.z * distance;
         const height = this.skyMeadowHeightWorld(x, z);
@@ -2966,7 +3095,7 @@ class PrivateRoom {
       }
       let doorDistance = crestDistance + 48;
       let doorHeight = Number.POSITIVE_INFINITY;
-      const searchEnd = Math.min(300, crestDistance + 92);
+      const searchEnd = Math.min(320, crestDistance + 92);
       for (let distance = crestDistance + 34; distance <= searchEnd; distance += 4) {
         const x = trailStartX + direction.x * distance;
         const z = trailStartZ + direction.z * distance;
@@ -2986,7 +3115,7 @@ class PrivateRoom {
     }
 
     const direction = placement.direction;
-    const doorDistance = clamp(placement.doorDistance, 130, 300);
+    const doorDistance = clamp(placement.doorDistance, 330, 350);
     const doorX = trailStartX + direction.x * doorDistance;
     const doorZ = trailStartZ + direction.z * doorDistance;
     this.skyDoorLandscape.set(doorX, doorZ, 1);
@@ -3007,7 +3136,8 @@ class PrivateRoom {
     this.skyDoorRoot.rotation.y = Math.atan2(direction.x, direction.z);
     this.skyDoorRoot.visible = true;
     this.skyButterflyGroup.visible = true;
-    this.placeSkyMushroomTrail(trailStartX, trailStartZ, doorX, doorZ);
+    this.positionSkyGuideButterflies(trailStartX, trailStartZ, doorX, doorZ);
+    if (placeGuides) this.activateSkyDoorGuides();
   }
 
   updateSkyButterflies() {
@@ -3015,20 +3145,76 @@ class PrivateRoom {
     const dummy = this.skyButterflyDummy;
     const door = this.skyDoorRoot.position;
     this.skyButterflies.forEach((record, index) => {
-      const angle = this.elapsed * record.speed + record.phase;
-      const x = door.x + Math.cos(angle) * record.radius;
-      const z = door.z + Math.sin(angle) * record.radius * .64;
-      const terrainY = this.skyMeadowHeightWorld(x, z);
-      const y = Math.max(
-        terrainY + .7,
-        door.y + record.height + Math.sin(angle * 2.3 + record.phase) * .65
-      );
-      const velocityX = -Math.sin(angle) * record.radius;
-      const velocityZ = Math.cos(angle) * record.radius * .64;
+      let x;
+      let y;
+      let z;
+      let velocityX;
+      let velocityZ;
+      let flap;
+      let angle = this.elapsed * record.speed + record.phase;
+
+      if (record.role === "guide" && record.state === "perched") {
+        const playerDistance = Math.hypot(
+          this.freeCameraPosition.x - record.perch.x,
+          this.freeCameraPosition.z - record.perch.z
+        );
+        if (this.skyMeadowGrounded && playerDistance < 9.5) {
+          record.state = "guiding";
+          record.flightStart = this.elapsed;
+          record.flightStartPosition.copy(record.perch);
+          const remaining = Math.hypot(door.x - record.perch.x, door.z - record.perch.z);
+          record.flightDuration = clamp(remaining / 9.2, 7, 26);
+        }
+      }
+
+      if (record.role === "guide" && record.state === "perched") {
+        x = record.perch.x;
+        z = record.perch.z;
+        y = record.perch.y + Math.sin(this.elapsed * 1.6 + record.phase) * .018;
+        velocityX = door.x - x;
+        velocityZ = door.z - z;
+        flap = .1 + (.5 + .5 * Math.sin(this.elapsed * 2.4 + record.phase)) * .12;
+      } else if (record.role === "guide" && record.state === "guiding") {
+        const rawProgress = clamp(
+          (this.elapsed - record.flightStart) / record.flightDuration,
+          0,
+          1
+        );
+        const flightProgress = smoothstep01(rawProgress);
+        const targetX = door.x + Math.cos(record.phase) * record.radius * .42;
+        const targetZ = door.z + Math.sin(record.phase) * record.radius * .32;
+        const travelX = targetX - record.flightStartPosition.x;
+        const travelZ = targetZ - record.flightStartPosition.z;
+        const travelLength = Math.max(1, Math.hypot(travelX, travelZ));
+        const perpendicularX = -travelZ / travelLength;
+        const perpendicularZ = travelX / travelLength;
+        const arc = Math.sin(rawProgress * Math.PI) * record.guideArc * (3.8 + index * .34);
+        x = lerp(record.flightStartPosition.x, targetX, flightProgress) + perpendicularX * arc;
+        z = lerp(record.flightStartPosition.z, targetZ, flightProgress) + perpendicularZ * arc;
+        const terrainY = this.skyMeadowHeightWorld(x, z);
+        y = terrainY + 1.45
+          + Math.sin(rawProgress * Math.PI) * (3.5 + index * .22)
+          + Math.sin(rawProgress * 18 + record.phase) * .22;
+        velocityX = travelX + perpendicularX * Math.cos(rawProgress * Math.PI) * record.guideArc * 8;
+        velocityZ = travelZ + perpendicularZ * Math.cos(rawProgress * Math.PI) * record.guideArc * 8;
+        flap = .48 + (.5 + .5 * Math.sin(this.elapsed * (12.5 + index % 4) + record.phase)) * .62;
+        if (rawProgress >= 1) record.state = "orbit";
+      } else {
+        angle = this.elapsed * record.speed + record.phase;
+        x = door.x + Math.cos(angle) * record.radius;
+        z = door.z + Math.sin(angle) * record.radius * .64;
+        const terrainY = this.skyMeadowHeightWorld(x, z);
+        y = Math.max(
+          terrainY + .7,
+          door.y + record.height + Math.sin(angle * 2.3 + record.phase) * .65
+        );
+        velocityX = -Math.sin(angle) * record.radius;
+        velocityZ = Math.cos(angle) * record.radius * .64;
+        flap = .5 + (.5 + .5 * Math.sin(this.elapsed * (11.5 + index % 5) + record.phase)) * .58;
+      }
       const yaw = Math.atan2(-velocityX, -velocityZ);
       const pitch = Math.sin(angle * 1.7 + record.phase) * .09;
       const bank = Math.sin(angle + record.phase) * .2;
-      const flap = .5 + (.5 + .5 * Math.sin(this.elapsed * (11.5 + index % 5) + record.phase)) * .58;
       const scale = record.scale * (.92 + Math.sin(angle * 1.7) * .08);
       const orientation = this.skyButterflyOrientation;
       orientation.setFromEuler(this.skyButterflyEuler.set(pitch, yaw, bank, "YXZ"));
@@ -3070,6 +3256,7 @@ class PrivateRoom {
         dummy.updateMatrix();
         antenna.setMatrixAt(index, dummy.matrix);
       });
+      record.lastPosition.set(x, y, z);
     });
     this.skyButterflyMeshes.forEach((mesh) => {
       mesh.instanceMatrix.needsUpdate = true;
@@ -3089,14 +3276,21 @@ class PrivateRoom {
       1
     );
     let progress = this.skyMeadowProgress;
+    if (!this.skyDoorSpawned && progress >= .72) {
+      // Lock the destination while the player is still descending, but late
+      // enough that a normally walking player cannot pass it before landing.
+      this.skyMeadowOrigin.copy(this.freeCameraPosition);
+      this.spawnSkyDoor(false);
+    }
     const contactBaseY = this.skyBaseY
       - this.freeEyeHeight
       - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
 
     if (!this.skyMeadowGrounded) {
       this.skyMeadowBaseY = damp(this.skyMeadowBaseY, contactBaseY, .62, delta);
+      const riseProgress = smoothstep01(clamp(progress / .97, 0, 1));
       this.skyMeadowRoot.position.y = this.skyMeadowBaseY
-        - this.skyMeadowContactDepth * (1 - progress);
+        - this.skyMeadowContactDepth * (1 - riseProgress);
       this.skyMeadowCameraY = this.skyBaseY;
       if (progress >= .97) {
         progress = 1;
@@ -3110,7 +3304,7 @@ class PrivateRoom {
     } else {
       this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
       if (movingOnSky) this.skyMeadowGroundWalkTime += delta;
-      if (this.skyMeadowGroundWalkTime >= this.skyDoorDelay) this.spawnSkyDoor();
+      if (this.skyMeadowGroundWalkTime >= this.skyDoorDelay) this.spawnSkyDoor(true);
       const groundEye = this.skyMeadowBaseY
         + this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z)
         + this.freeEyeHeight;
@@ -3121,17 +3315,8 @@ class PrivateRoom {
     this.skyMeadowTerrain.position.z = Math.round(this.freeCameraPosition.z / 12) * 12;
     this.updateSkyMeadowTiles();
 
-    const plantGrowth = smoothstep01(clamp((progress - .06) / .62, 0, 1));
-    const flowerGrowth = smoothstep01(clamp((progress - .1) / .72, 0, 1));
-    const flowerPopulation = progress < .08
-      ? 0
-      : Math.max(
-        1,
-        Math.floor(
-          this.skyMeadowFlowerCount
-          * (.12 + smoothstep01(clamp((progress - .08) / .82, 0, 1)) * .88)
-        )
-      );
+    const plantGrowth = .06 + smoothstep01(clamp(progress / .68, 0, 1)) * .94;
+    const flowerGrowth = .16 + smoothstep01(clamp(progress / .62, 0, 1)) * .84;
     this.skyMeadowTerrainMaterial.uniforms.uOpacity.value = 1;
     this.skyMeadowTerrainMaterial.uniforms.uTime.value = this.elapsed;
     this.skyMeadowTerrainMaterial.uniforms.uRiseProgress.value = progress;
@@ -3142,7 +3327,7 @@ class PrivateRoom {
     this.skyMeadowFlowerMaterial.uniforms.uTime.value = this.elapsed;
     this.skyMeadowFlowerMaterial.uniforms.uRiseProgress.value = progress;
     this.skyMeadowFlowerGeometries?.forEach((geometry) => {
-      geometry.instanceCount = flowerPopulation;
+      geometry.instanceCount = geometry.userData.maxInstanceCount;
     });
 
     if (this.skyDoorSpawned) {
@@ -3241,6 +3426,7 @@ class PrivateRoom {
     this.skyMeadowGroundWalkTime = 0;
     this.skyDoorSpawned = false;
     this.skyDoorReveal = 0;
+    this.skyDoorGuidesPlaced = false;
     this.skyDoorLandscape.set(0, 0, 0);
     this.skyMeadowTileCenterX = Number.NaN;
     this.skyMeadowTileCenterZ = Number.NaN;
@@ -3612,27 +3798,27 @@ class PrivateRoom {
 
   createEndlessCity() {
     this.cityScene = new THREE.Scene();
-    this.cityScene.background = new THREE.Color(0x02050a);
-    this.cityScene.fog = new THREE.FogExp2(0x040810, .0155);
-    this.cityHemisphereLight = new THREE.HemisphereLight(0x7890ad, 0x020305, .62);
+    this.cityScene.background = new THREE.Color(0x02060c);
+    this.cityScene.fog = new THREE.FogExp2(0x060b14, .012);
+    this.cityHemisphereLight = new THREE.HemisphereLight(0x819bb9, 0x020305, .78);
     this.cityScene.add(this.cityHemisphereLight);
-    this.cityMoonLight = new THREE.DirectionalLight(0x91afd5, 1.28);
+    this.cityMoonLight = new THREE.DirectionalLight(0x9bbbe1, 1.55);
     this.cityMoonLight.position.set(-38, 68, 24);
     this.cityScene.add(this.cityMoonLight);
-    this.cityBaseBackground = new THREE.Color(0x02050a);
+    this.cityBaseBackground = new THREE.Color(0x02060c);
     this.cityBioBackground = new THREE.Color(0x110205);
-    this.cityBaseFog = new THREE.Color(0x040810);
+    this.cityBaseFog = new THREE.Color(0x060b14);
     this.cityBioFog = new THREE.Color(0x190307);
-    this.cityBaseHemisphereColor = new THREE.Color(0x7890ad);
+    this.cityBaseHemisphereColor = new THREE.Color(0x819bb9);
     this.cityBioHemisphereColor = new THREE.Color(0x8c2435);
     this.cityBaseGroundLightColor = new THREE.Color(0x020305);
     this.cityBioGroundLightColor = new THREE.Color(0x170205);
-    this.cityBaseMoonColor = new THREE.Color(0x91afd5);
+    this.cityBaseMoonColor = new THREE.Color(0x9bbbe1);
     this.cityBioMoonColor = new THREE.Color(0xb93649);
 
     const starGeometry = new THREE.BufferGeometry();
     const starPositions = [];
-    for (let i = 0; i < 420; i += 1) {
+    for (let i = 0; i < 560; i += 1) {
       const angle = Math.random() * Math.PI * 2;
       const radius = 110 + Math.random() * 150;
       starPositions.push(Math.cos(angle) * radius, 38 + Math.random() * 125, Math.sin(angle) * radius);
@@ -3644,28 +3830,69 @@ class PrivateRoom {
     );
     this.cityScene.add(this.cityStars);
 
+    const moonCanvas = document.createElement("canvas");
+    moonCanvas.width = moonCanvas.height = 256;
+    const moonContext = moonCanvas.getContext("2d");
+    const moonGlow = moonContext.createRadialGradient(128, 128, 18, 128, 128, 126);
+    moonGlow.addColorStop(0, "rgba(236,246,255,1)");
+    moonGlow.addColorStop(.23, "rgba(205,225,246,.96)");
+    moonGlow.addColorStop(.34, "rgba(151,187,225,.35)");
+    moonGlow.addColorStop(1, "rgba(91,137,187,0)");
+    moonContext.fillStyle = moonGlow;
+    moonContext.fillRect(0, 0, 256, 256);
+    const moonTexture = new THREE.CanvasTexture(moonCanvas);
+    moonTexture.colorSpace = THREE.SRGBColorSpace;
+    this.cityMoonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: moonTexture,
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+      opacity: .82,
+      blending: THREE.AdditiveBlending
+    }));
+    this.cityMoonSprite.position.set(-86, 92, -190);
+    this.cityMoonSprite.scale.set(34, 34, 1);
+    this.cityScene.add(this.cityMoonSprite);
+    this.cityBaseMoonSpriteColor = new THREE.Color(0xd9ecff);
+    this.cityBioMoonSpriteColor = new THREE.Color(0xff5266);
+    this.cityMoonSprite.material.color.copy(this.cityBaseMoonSpriteColor);
+
     const makeFacade = (litColor, darkColor, frequency) => {
       const canvas = document.createElement("canvas");
-      canvas.width = 128;
-      canvas.height = 256;
+      canvas.width = 256;
+      canvas.height = 512;
       const context = canvas.getContext("2d");
       context.fillStyle = darkColor;
       context.fillRect(0, 0, canvas.width, canvas.height);
-      for (let y = 8; y < 250; y += 15) {
-        for (let x = 7; x < 124; x += 14) {
+      const facadeShade = context.createLinearGradient(0, 0, canvas.width, 0);
+      facadeShade.addColorStop(0, "rgba(0,0,0,.34)");
+      facadeShade.addColorStop(.22, "rgba(255,255,255,.035)");
+      facadeShade.addColorStop(.72, "rgba(255,255,255,.015)");
+      facadeShade.addColorStop(1, "rgba(0,0,0,.42)");
+      context.fillStyle = facadeShade;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      for (let y = 13; y < 505; y += 29) {
+        context.fillStyle = "rgba(0,0,0,.36)";
+        context.fillRect(0, y - 4, canvas.width, 2);
+        for (let x = 13; x < 248; x += 28) {
           const lit = Math.abs(Math.sin(x * 2.17 + y * 4.93 + frequency * 11)) > frequency;
-          context.fillStyle = lit ? litColor : "rgba(8,13,20,.92)";
-          context.fillRect(x, y, 7, 7);
+          context.fillStyle = "rgba(2,6,11,.86)";
+          context.fillRect(x - 2, y - 2, 16, 15);
+          context.fillStyle = lit ? litColor : "rgba(8,13,20,.94)";
+          context.fillRect(x, y, 12, 10);
           if (lit) {
-            context.fillStyle = "rgba(255,255,255,.18)";
-            context.fillRect(x, y, 7, 1);
+            context.fillStyle = "rgba(255,255,255,.24)";
+            context.fillRect(x, y, 12, 2);
+            context.fillStyle = "rgba(255,218,151,.08)";
+            context.fillRect(x - 2, y - 2, 16, 15);
           }
         }
       }
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
       return texture;
     };
 
@@ -3731,6 +3958,9 @@ class PrivateRoom {
     const roadTexture = makeSurfaceTexture("road");
     const pavementTexture = makeSurfaceTexture("pavement");
     const maxAnisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    facadeTextures.forEach((texture) => {
+      texture.anisotropy = maxAnisotropy;
+    });
     roadTexture.anisotropy = maxAnisotropy;
     pavementTexture.anisotropy = maxAnisotropy;
 
@@ -4224,6 +4454,16 @@ class PrivateRoom {
         halfWidth: width * .5,
         halfDepth: depth * .5
       });
+      const frontSign = building.position.z < 0 ? 1 : -1;
+      const frontRotation = frontSign > 0 ? 0 : Math.PI;
+
+      const roofTrim = new THREE.Mesh(
+        new THREE.BoxGeometry(width + .38, .28, depth + .38),
+        this.cityRoofMaterial
+      );
+      roofTrim.position.set(building.position.x, baseHeight + .32, building.position.z);
+      roofTrim.castShadow = true;
+      chunk.add(roofTrim);
 
       if (style === 0 || style === 3) {
         const tierHeight = 6 + seeded(plotIndex + 51) * 15;
@@ -4234,6 +4474,12 @@ class PrivateRoom {
         tier.position.set(building.position.x, baseHeight + tierHeight * .5 + .22, building.position.z);
         tier.castShadow = true;
         chunk.add(tier);
+        const tierCrown = new THREE.Mesh(
+          new THREE.BoxGeometry(width * .66, .24, depth * .66),
+          this.cityRoofMaterial
+        );
+        tierCrown.position.set(building.position.x, baseHeight + tierHeight + .34, building.position.z);
+        chunk.add(tierCrown);
       } else if (style === 1) {
         const tank = new THREE.Mesh(
           new THREE.CylinderGeometry(2.1, 2.35, 3.1, 12),
@@ -4260,7 +4506,12 @@ class PrivateRoom {
           new THREE.PlaneGeometry(Math.min(width * .68, 8), 1.15),
           new THREE.MeshBasicMaterial({ color: signColor, toneMapped: false, transparent: true, opacity: .82 })
         );
-        sign.position.set(building.position.x, 4.2 + seeded(plotIndex + 90) * 8, building.position.z + depth * .505);
+        sign.position.set(
+          building.position.x,
+          4.2 + seeded(plotIndex + 90) * 8,
+          building.position.z + frontSign * depth * .505
+        );
+        sign.rotation.y = frontRotation;
         chunk.add(sign);
       }
 
@@ -4268,15 +4519,28 @@ class PrivateRoom {
         new THREE.BoxGeometry(Math.min(width * .68, 8.5), 2.15, .22),
         this.cityGlassMaterial
       );
-      storefront.position.set(building.position.x, 1.4, building.position.z + depth * .51);
+      storefront.position.set(building.position.x, 1.4, building.position.z + frontSign * depth * .51);
       detailGroup.add(storefront);
       const awning = new THREE.Mesh(
         new THREE.BoxGeometry(Math.min(width * .76, 9.4), .13, .92),
         this.cityBuildingMaterials[(style + 2) % 4]
       );
-      awning.position.set(building.position.x, 2.68, building.position.z + depth * .54);
-      awning.rotation.x = -.13;
+      awning.position.set(building.position.x, 2.68, building.position.z + frontSign * depth * .54);
+      awning.rotation.x = -.13 * frontSign;
       detailGroup.add(awning);
+
+      for (let ribIndex = -1; ribIndex <= 1; ribIndex += 2) {
+        const facadeRib = new THREE.Mesh(
+          new THREE.BoxGeometry(.13, Math.min(baseHeight - 2, 24), .18),
+          this.cityConcreteDetailMaterial
+        );
+        facadeRib.position.set(
+          building.position.x + ribIndex * width * .36,
+          Math.min(baseHeight * .5 + 1, 13),
+          building.position.z + frontSign * depth * .515
+        );
+        detailGroup.add(facadeRib);
+      }
 
       for (let unitIndex = 0; unitIndex < 2; unitIndex += 1) {
         const unit = new THREE.Mesh(new THREE.BoxGeometry(.72, .52, .28), this.cityConcreteDetailMaterial);
@@ -4315,7 +4579,7 @@ class PrivateRoom {
       drainPipe.position.set(
         building.position.x - width * .43,
         Math.min(baseHeight * .5, 9.5),
-        building.position.z + depth * .514
+        building.position.z + frontSign * depth * .514
       );
       detailGroup.add(drainPipe);
 
@@ -4328,7 +4592,7 @@ class PrivateRoom {
         ledge.position.set(
           building.position.x,
           5.2 + ledgeIndex * 4.6,
-          building.position.z + depth * .515
+          building.position.z + frontSign * depth * .515
         );
         detailGroup.add(ledge);
       }
@@ -4341,14 +4605,22 @@ class PrivateRoom {
             new THREE.BoxGeometry(2.8, .08, .72),
             this.cityMetalMaterial
           );
-          platform.position.set(building.position.x + width * .22, escapeY, building.position.z + depth * .55);
+          platform.position.set(
+            building.position.x + width * .22,
+            escapeY,
+            building.position.z + frontSign * depth * .55
+          );
           detailGroup.add(platform);
           for (let barIndex = -2; barIndex <= 2; barIndex += 1) {
             const bar = new THREE.Mesh(
               new THREE.CylinderGeometry(.022, .022, .72, 5),
               this.cityMetalMaterial
             );
-            bar.position.set(platform.position.x + barIndex * .55, escapeY + .36, platform.position.z + .3);
+            bar.position.set(
+              platform.position.x + barIndex * .55,
+              escapeY + .36,
+              platform.position.z + frontSign * .3
+            );
             detailGroup.add(bar);
           }
           if (escapeIndex < 2) {
@@ -4356,7 +4628,11 @@ class PrivateRoom {
               new THREE.BoxGeometry(.055, 4.35, .055),
               this.cityMetalMaterial
             );
-            ladder.position.set(platform.position.x + 1.1, escapeY + 2.2, platform.position.z + .31);
+            ladder.position.set(
+              platform.position.x + 1.1,
+              escapeY + 2.2,
+              platform.position.z + frontSign * .31
+            );
             detailGroup.add(ladder);
           }
         }
@@ -4369,14 +4645,15 @@ class PrivateRoom {
       serviceDoor.position.set(
         building.position.x - width * .28,
         1.32,
-        building.position.z + depth * .523
+        building.position.z + frontSign * depth * .523
       );
+      serviceDoor.rotation.y = frontRotation;
       detailGroup.add(serviceDoor);
       const doorLamp = new THREE.Mesh(
         new THREE.BoxGeometry(.24, .13, .1),
         this.cityLampMaterial
       );
-      doorLamp.position.set(serviceDoor.position.x, 2.55, serviceDoor.position.z + .08);
+      doorLamp.position.set(serviceDoor.position.x, 2.55, serviceDoor.position.z + frontSign * .08);
       detailGroup.add(doorLamp);
 
       const facadePoint = (side, u, y, offset = .12) => {
@@ -5006,7 +5283,7 @@ class PrivateRoom {
 
     this.cityScene.background.lerpColors(this.cityBaseBackground, this.cityBioBackground, progress);
     this.cityScene.fog.color.lerpColors(this.cityBaseFog, this.cityBioFog, progress);
-    this.cityScene.fog.density = lerp(.0155, .023, progress);
+    this.cityScene.fog.density = lerp(.012, .0215, progress);
     this.cityHemisphereLight.color.lerpColors(
       this.cityBaseHemisphereColor,
       this.cityBioHemisphereColor,
@@ -5017,13 +5294,21 @@ class PrivateRoom {
       this.cityBioGroundLightColor,
       progress
     );
-    this.cityHemisphereLight.intensity = lerp(.62, .42 + heartbeat * .12, progress);
+    this.cityHemisphereLight.intensity = lerp(.78, .42 + heartbeat * .12, progress);
     this.cityMoonLight.color.lerpColors(
       this.cityBaseMoonColor,
       this.cityBioMoonColor,
       progress
     );
-    this.cityMoonLight.intensity = lerp(1.28, .72 + deepPulse * .2, progress);
+    this.cityMoonLight.intensity = lerp(1.55, .72 + deepPulse * .2, progress);
+    if (this.cityMoonSprite) {
+      this.cityMoonSprite.material.opacity = lerp(.82, .16 + deepPulse * .08, progress);
+      this.cityMoonSprite.material.color.lerpColors(
+        this.cityBaseMoonSpriteColor,
+        this.cityBioMoonSpriteColor,
+        progress
+      );
+    }
     this.cityLampMaterial.color.lerpColors(this.cityBaseLampColor, this.cityBioLampColor, progress * .78);
     if (this.cityStars) this.cityStars.material.opacity = lerp(.62, .06, progress);
 
@@ -5163,6 +5448,10 @@ class PrivateRoom {
     if (this.cityStars) {
       this.cityStars.position.x = this.freeCameraPosition.x;
       this.cityStars.position.z = this.freeCameraPosition.z;
+    }
+    if (this.cityMoonSprite) {
+      this.cityMoonSprite.position.x = this.freeCameraPosition.x - 86;
+      this.cityMoonSprite.position.z = this.freeCameraPosition.z - 190;
     }
   }
 
@@ -6993,7 +7282,7 @@ class PrivateRoom {
             - this.skyMeadowHeightWorld(this.freeCameraPosition.x, this.freeCameraPosition.z);
           this.skyMeadowRoot.position.y = this.skyMeadowBaseY;
           this.skyMeadowGroundWalkTime = this.skyDoorDelay;
-          this.spawnSkyDoor();
+          this.spawnSkyDoor(true);
           this.freeCameraPosition.x = this.skyDoorRoot.position.x - this.skyMeadowDirection.x * 38;
           this.freeCameraPosition.z = this.skyDoorRoot.position.z - this.skyMeadowDirection.z * 38;
           const surfaceEye = this.skyMeadowBaseY
